@@ -13,16 +13,29 @@ def test_app_displays_data_status_latest_trade_day_and_price_basis():
 def test_app_price_chart_uses_china_market_colors_and_always_shows_ma10():
     source = Path("app.py").read_text(encoding="utf-8")
 
-    assert 'up_color = "#e53935"' in source
-    assert 'down_color = "#0a9b68"' in source
-    assert "increasing_fillcolor=up_color" in source
-    assert "decreasing_fillcolor=down_color" in source
+    assert 'UP_COLOR = "#e53935"' in source
+    assert 'DOWN_COLOR = "#0a9b68"' in source
+    assert "increasing_fillcolor=UP_COLOR" in source
+    assert "decreasing_fillcolor=DOWN_COLOR" in source
     assert 'name=f"MA{window}"' in source
     assert "for window in (5, 10, 20)" in source
     assert 'side="right"' in source
     assert '"bounds": ["sat", "mon"]' in source
     assert '["日K", "周K", "月K", "年K"]' in source
     assert "aggregate_price_bars(result, period)" in source
+    assert "default_visible_bar_range(chart_data, period)" in source
+    assert 'dragmode="pan"' in source
+    assert '"thickness": 0.075' in source
+
+
+def test_app_uses_china_market_colors_for_metric_deltas():
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'stMetricDeltaIcon-Up' in source
+    assert 'stMetricDeltaIcon-Down' in source
+    assert 'delta_color="inverse"' in source
+    assert 'f"{summary[\'excess_return_pct\']:+.2f}% 超额"' in source
+    assert '当前信号 · {signal_action}' in source
 
 
 def test_app_exposes_human_friendly_watchlist_navigation_and_refresh_feedback():

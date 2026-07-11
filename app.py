@@ -22,7 +22,7 @@ from ashare_quant.backtest import (
     summarize_backtest,
     yearly_return_table,
 )
-from ashare_quant.charting import aggregate_price_bars
+from ashare_quant.charting import aggregate_price_bars, default_visible_bar_range
 from ashare_quant.data import (
     fetch_ashare_daily,
     fetch_latest_market_quote,
@@ -66,6 +66,8 @@ from ashare_quant.watchlist import (
 
 STRATEGY_NAMES = ["双均线交叉", "RSI超卖反弹", "MACD金叉", "布林带均值回归"]
 PLOT_CONFIG = {"displaylogo": False, "scrollZoom": True, "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
+UP_COLOR = "#e53935"
+DOWN_COLOR = "#0a9b68"
 TABLE_LABELS = {
     "symbol": "代码",
     "name": "名称",
@@ -129,8 +131,8 @@ st.markdown(
         --canvas: #f3f5f6;
         --accent: #b42318;
         --accent-dark: #8f1d15;
-        --positive: #b42318;
-        --negative: #087a55;
+        --positive: #e53935;
+        --negative: #0a9b68;
         --blue: #2457a6;
         --amber: #a15c00;
         --soft-blue: #edf3fb;
@@ -168,6 +170,13 @@ st.markdown(
     [data-testid="stMetric"]:hover { border-color: var(--line-strong); }
     [data-testid="stMetricLabel"] { color: var(--muted); font-size: 0.82rem; }
     [data-testid="stMetricValue"] { color: var(--ink); font-size: 1.48rem; font-weight: 720; }
+    [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]) {
+        color: var(--positive) !important;
+    }
+    [data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]) {
+        color: var(--negative) !important;
+    }
+    [data-testid="stMetricDelta"] svg { fill: currentColor !important; }
     .aq-brand { font-size: 1.08rem; font-weight: 750; color: var(--ink); margin-bottom: 0.08rem; }
     .aq-brand-mark {
         display: inline-block;
@@ -489,10 +498,9 @@ def run_stock_pool_scan_for_symbols(symbols: list[str], progress_callback=None) 
 
 
 def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str = "日K") -> go.Figure:
-    up_color = "#e53935"
-    down_color = "#0a9b68"
     ma_colors = {5: "#d99100", 10: "#2468d8", 20: "#9b51c7"}
     chart_data = aggregate_price_bars(result, period)
+    initial_range = default_visible_bar_range(chart_data, period)
     dates = pd.to_datetime(chart_data["date"])
     closes = pd.to_numeric(chart_data["close"], errors="coerce")
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
@@ -504,10 +512,10 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
             low=chart_data["low"],
             close=chart_data["close"],
             name=period,
-            increasing_line_color=up_color,
-            increasing_fillcolor=up_color,
-            decreasing_line_color=down_color,
-            decreasing_fillcolor=down_color,
+            increasing_line_color=UP_COLOR,
+            increasing_fillcolor=UP_COLOR,
+            decreasing_line_color=DOWN_COLOR,
+            decreasing_fillcolor=DOWN_COLOR,
             whiskerwidth=0.35,
         ),
         row=1,
@@ -535,9 +543,9 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     if period == "日K" and not trades.empty:
         buys = trades[trades["action"] == "BUY"]
         sells = trades[trades["action"] == "SELL"]
-        fig.add_trace(go.Scatter(x=buys["date"], y=buys["price"], mode="markers", name="买入", marker={"symbol": "triangle-up", "size": 10, "color": up_color}), row=1, col=1)
-        fig.add_trace(go.Scatter(x=sells["date"], y=sells["price"], mode="markers", name="卖出", marker={"symbol": "triangle-down", "size": 10, "color": down_color}), row=1, col=1)
-    volume_colors = [up_color if close >= open_ else down_color for open_, close in zip(chart_data["open"], chart_data["close"])]
+        fig.add_trace(go.Scatter(x=buys["date"], y=buys["price"], mode="markers", name="买入", marker={"symbol": "triangle-up", "size": 10, "color": UP_COLOR}), row=1, col=1)
+        fig.add_trace(go.Scatter(x=sells["date"], y=sells["price"], mode="markers", name="卖出", marker={"symbol": "triangle-down", "size": 10, "color": DOWN_COLOR}), row=1, col=1)
+    volume_colors = [UP_COLOR if close >= open_ else DOWN_COLOR for open_, close in zip(chart_data["open"], chart_data["close"])]
     fig.add_trace(
         go.Bar(
             x=dates,
@@ -552,7 +560,7 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     )
 
     latest_close = float(closes.iloc[-1])
-    latest_color = up_color if float(chart_data["close"].iloc[-1]) >= float(chart_data["open"].iloc[-1]) else down_color
+    latest_color = UP_COLOR if float(chart_data["close"].iloc[-1]) >= float(chart_data["open"].iloc[-1]) else DOWN_COLOR
     fig.add_hline(
         y=latest_close,
         row=1,
@@ -568,9 +576,10 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     market_holidays = weekday_dates.difference(market_dates)
     fig.update_layout(
         template="plotly_white",
-        height=610,
-        margin={"l": 12, "r": 62, "t": 32, "b": 12},
+        height=660 if initial_range is not None else 610,
+        margin={"l": 12, "r": 62, "t": 32, "b": 18},
         xaxis_rangeslider_visible=False,
+        dragmode="pan",
         hovermode="x",
         hoverdistance=40,
         spikedistance=-1,
@@ -593,6 +602,20 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
         spikesnap="cursor",
         tickformat={"日K": "%m-%d", "周K": "%m-%d", "月K": "%Y-%m", "年K": "%Y"}[period],
     )
+    if initial_range is not None:
+        fig.update_xaxes(range=list(initial_range))
+    fig.update_xaxes(rangeslider_visible=False)
+    fig.update_xaxes(
+        rangeslider={
+            "visible": initial_range is not None,
+            "thickness": 0.075,
+            "bgcolor": "#f6f8f9",
+            "bordercolor": "#dce2e6",
+            "borderwidth": 1,
+        },
+        row=2,
+        col=1,
+    )
     fig.update_yaxes(title_text="价格", side="right", tickformat=".2f", row=1, col=1, gridcolor="#e7eaed", zeroline=False, fixedrange=False)
     fig.update_yaxes(title_text="成交量", side="right", tickformat="~s", row=2, col=1, gridcolor="#eef0f2", zeroline=False, fixedrange=False)
     return fig
@@ -606,7 +629,7 @@ def build_indicator_figure(result: pd.DataFrame) -> go.Figure | None:
         fig.add_hline(y=rsi_overbought, line_dash="dash", line_color="#137333", annotation_text="超买")
         fig.update_yaxes(range=[0, 100])
     elif strategy_name == "MACD金叉":
-        colors = ["#b42318" if value >= 0 else "#137333" for value in result["macd_hist"]]
+        colors = [UP_COLOR if value >= 0 else DOWN_COLOR for value in result["macd_hist"]]
         fig.add_trace(go.Bar(x=result["date"], y=result["macd_hist"], name="MACD柱", marker_color=colors))
         fig.add_trace(go.Scatter(x=result["date"], y=result["macd_dif"], name="DIF", line={"color": "#2457a6"}))
         fig.add_trace(go.Scatter(x=result["date"], y=result["macd_dea"], name="DEA", line={"color": "#d97706"}))
@@ -830,12 +853,13 @@ else:
 
 latest = result.iloc[-1]
 signal_label = "持有 / 关注" if int(latest.get("signal", 0)) == 1 else "空仓 / 等待"
+signal_action = str(latest.get("action", "")) or "无新动作"
 metric_cols = st.columns(5)
-metric_cols[0].metric("实时价格" if quote else "最新历史收盘", f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%")
-metric_cols[1].metric("当前信号", signal_label, str(latest.get("action", "")) or "无新动作")
-metric_cols[2].metric("策略总收益", f"{summary['total_return_pct']:.2f}%", f"超额 {summary['excess_return_pct']:+.2f}%")
+metric_cols[0].metric("实时价格" if quote else "最新历史收盘", f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%", delta_color="inverse")
+metric_cols[1].metric(f"当前信号 · {signal_action}", signal_label)
+metric_cols[2].metric("策略总收益", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
 metric_cols[3].metric("最大回撤", f"{summary['max_drawdown_pct']:.2f}%")
-metric_cols[4].metric("夏普比率", f"{summary['sharpe']:.2f}", f"{summary['trade_count']} 次交易")
+metric_cols[4].metric(f"夏普比率 · {summary['trade_count']}次交易", f"{summary['sharpe']:.2f}")
 status_label = "数据可能滞后" if data_status["is_stale"] else "数据已校验"
 status_tone = "stale" if data_status["is_stale"] else ""
 quote_mode = "实时行情" if quote else "历史收盘"

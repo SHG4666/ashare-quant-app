@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ashare_quant.charting import aggregate_price_bars
+from ashare_quant.charting import aggregate_price_bars, default_visible_bar_range
 from ashare_quant.ui_helpers import (
     indicator_display_columns,
     normalize_ashare_symbol,
@@ -45,6 +45,25 @@ def test_aggregate_price_bars_uses_last_trading_day_for_yearly_bar_date():
     yearly = aggregate_price_bars(daily, "年K")
 
     assert yearly["date"].tolist() == [pd.Timestamp("2025-12-31"), pd.Timestamp("2026-01-02")]
+
+
+def test_default_visible_bar_range_limits_dense_daily_chart_to_recent_90_bars():
+    dates = pd.bdate_range("2025-01-01", periods=140)
+    daily = pd.DataFrame({"date": dates})
+
+    visible_range = default_visible_bar_range(daily, "日K")
+
+    assert visible_range is not None
+    start, end = visible_range
+    visible_dates = dates[(dates >= start) & (dates <= end)]
+    assert len(visible_dates) == 90
+    assert end > dates[-1]
+
+
+def test_default_visible_bar_range_keeps_short_series_fully_visible():
+    monthly = pd.DataFrame({"date": pd.date_range("2025-01-31", periods=24, freq="ME")})
+
+    assert default_visible_bar_range(monthly, "月K") is None
 
 
 def test_parse_portfolio_symbols_accepts_newlines_commas_and_removes_duplicates_preserving_order():
