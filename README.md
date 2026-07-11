@@ -46,7 +46,7 @@ python scripts/build_cloud_seed.py
 
 ## 本地运行
 
-推荐 Python 3.11：
+本地推荐 Python 3.11；云端使用 Streamlit 当前支持的 Python 版本：
 
 ```bash
 python -m venv .venv
