@@ -69,6 +69,7 @@ STRATEGY_NAMES = ["双均线交叉", "RSI超卖反弹", "MACD金叉", "布林带
 PLOT_CONFIG = {"displaylogo": False, "scrollZoom": True, "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
 UP_COLOR = "#e53935"
 DOWN_COLOR = "#0a9b68"
+AGGREGATED_VISIBLE_BARS = {"周K": 52, "月K": 36, "年K": 15}
 TABLE_LABELS = {
     "symbol": "代码",
     "name": "名称",
@@ -501,13 +502,28 @@ def run_stock_pool_scan_for_symbols(symbols: list[str], progress_callback=None) 
 def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str = "日K") -> go.Figure:
     ma_colors = {5: "#d99100", 10: "#2468d8", 20: "#9b51c7"}
     chart_data = aggregate_price_bars(result, period)
-    initial_range = default_visible_bar_range(chart_data, period)
     dates = pd.to_datetime(chart_data["date"])
     closes = pd.to_numeric(chart_data["close"], errors="coerce")
+    if period == "日K":
+        x_values = dates
+        initial_range: list[object] | None = list(default_visible_bar_range(chart_data, period) or []) or None
+        navigator_visible = initial_range is not None
+    else:
+        date_format = {"周K": "%Y-%m-%d", "月K": "%Y-%m", "年K": "%Y"}[period]
+        x_values = dates.dt.strftime(date_format)
+        visible_count = AGGREGATED_VISIBLE_BARS[period]
+        navigator_visible = False
+        if len(chart_data) > visible_count:
+            initial_range = [len(chart_data) - visible_count - 0.5, len(chart_data) - 0.5]
+        elif period == "年K" and len(chart_data) < 8:
+            padding = (8 - len(chart_data)) / 2
+            initial_range = [-0.5 - padding, len(chart_data) - 0.5 + padding]
+        else:
+            initial_range = None
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
     fig.add_trace(
         go.Candlestick(
-            x=dates,
+            x=x_values,
             open=chart_data["open"],
             high=chart_data["high"],
             low=chart_data["low"],
@@ -524,10 +540,13 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     )
 
     for window in (5, 10, 20):
+        moving_average = closes.rolling(window, min_periods=window).mean()
+        if moving_average.notna().sum() < 2:
+            continue
         fig.add_trace(
             go.Scatter(
-                x=dates,
-                y=closes.rolling(window, min_periods=window).mean(),
+                x=x_values,
+                y=moving_average,
                 mode="lines",
                 name=f"MA{window}",
                 line={"color": ma_colors[window], "width": 1.45},
@@ -549,12 +568,16 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     volume_colors = [UP_COLOR if close >= open_ else DOWN_COLOR for open_, close in zip(chart_data["open"], chart_data["close"])]
     fig.add_trace(
         go.Bar(
-            x=dates,
+            x=x_values,
             y=chart_data["volume"],
             name="成交量",
             marker_color=volume_colors,
             opacity=0.72,
-            hovertemplate="%{x|%Y-%m-%d}<br>成交量 %{y:,.0f}<extra></extra>",
+            hovertemplate=(
+                "%{x|%Y-%m-%d}<br>成交量 %{y:,.0f}<extra></extra>"
+                if period == "日K"
+                else "%{x}<br>成交量 %{y:,.0f}<extra></extra>"
+            ),
         ),
         row=2,
         col=1,
@@ -572,12 +595,9 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
         annotation_font={"color": latest_color, "size": 11},
     )
 
-    market_dates = pd.DatetimeIndex(dates.dt.normalize().unique())
-    weekday_dates = pd.date_range(market_dates.min(), market_dates.max(), freq="B")
-    market_holidays = weekday_dates.difference(market_dates)
     fig.update_layout(
         template="plotly_white",
-        height=660 if initial_range is not None else 610,
+        height=660 if navigator_visible else 610,
         margin={"l": 12, "r": 62, "t": 32, "b": 18},
         xaxis_rangeslider_visible=False,
         dragmode="pan",
@@ -591,24 +611,31 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
         plot_bgcolor="#ffffff",
         bargap=0.18,
     )
-    fig.update_xaxes(
-        rangebreaks=[{"bounds": ["sat", "mon"]}, {"values": market_holidays}],
-        showgrid=True,
-        gridcolor="#edf0f2",
-        gridwidth=1,
-        showspikes=True,
-        spikecolor="#7f8b94",
-        spikethickness=1,
-        spikedash="dot",
-        spikesnap="cursor",
-        tickformat={"日K": "%m-%d", "周K": "%m-%d", "月K": "%Y-%m", "年K": "%Y"}[period],
-    )
+    xaxis_options: dict[str, object] = {
+        "type": "date" if period == "日K" else "category",
+        "showgrid": True,
+        "gridcolor": "#edf0f2",
+        "gridwidth": 1,
+        "showspikes": True,
+        "spikecolor": "#7f8b94",
+        "spikethickness": 1,
+        "spikedash": "dot",
+        "spikesnap": "cursor",
+        "nticks": 10,
+    }
+    if period == "日K":
+        market_dates = pd.DatetimeIndex(dates.dt.normalize().unique())
+        weekday_dates = pd.date_range(market_dates.min(), market_dates.max(), freq="B")
+        market_holidays = weekday_dates.difference(market_dates)
+        xaxis_options["rangebreaks"] = [{"bounds": ["sat", "mon"]}, {"values": market_holidays}]
+        xaxis_options["tickformat"] = "%m-%d"
+    fig.update_xaxes(**xaxis_options)
     if initial_range is not None:
-        fig.update_xaxes(range=list(initial_range))
+        fig.update_xaxes(range=initial_range)
     fig.update_xaxes(rangeslider_visible=False)
     fig.update_xaxes(
         rangeslider={
-            "visible": initial_range is not None,
+            "visible": navigator_visible,
             "thickness": 0.075,
             "bgcolor": "#f6f8f9",
             "bordercolor": "#dce2e6",

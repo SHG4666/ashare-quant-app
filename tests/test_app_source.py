@@ -28,6 +28,16 @@ def test_app_price_chart_uses_china_market_colors_and_always_shows_ma10():
     assert '"thickness": 0.075' in source
 
 
+def test_app_uses_readable_equal_spaced_axes_for_aggregated_kline_periods():
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'AGGREGATED_VISIBLE_BARS = {"周K": 52, "月K": 36, "年K": 15}' in source
+    assert 'x_values = dates.dt.strftime(date_format)' in source
+    assert '"type": "date" if period == "日K" else "category"' in source
+    assert 'moving_average.notna().sum() < 2' in source
+    assert 'period == "年K" and len(chart_data) < 8' in source
+
+
 def test_app_uses_china_market_colors_for_metric_deltas():
     source = Path("app.py").read_text(encoding="utf-8")
 
