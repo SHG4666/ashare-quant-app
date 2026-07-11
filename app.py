@@ -22,6 +22,7 @@ from ashare_quant.backtest import (
     summarize_backtest,
     yearly_return_table,
 )
+from ashare_quant.charting import aggregate_price_bars
 from ashare_quant.data import (
     fetch_ashare_daily,
     fetch_latest_market_quote,
@@ -45,7 +46,6 @@ from ashare_quant.review_journal import (
 from ashare_quant.scanner import apply_latest_quotes_to_candidates, scan_stock_pool
 from ashare_quant.trade_plan import generate_trade_plan
 from ashare_quant.ui_helpers import (
-    aggregate_price_bars,
     indicator_display_columns,
     normalize_ashare_symbol,
     parse_portfolio_symbols,

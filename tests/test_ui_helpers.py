@@ -1,7 +1,7 @@
 import pandas as pd
 
+from ashare_quant.charting import aggregate_price_bars
 from ashare_quant.ui_helpers import (
-    aggregate_price_bars,
     indicator_display_columns,
     normalize_ashare_symbol,
     parse_portfolio_symbols,
