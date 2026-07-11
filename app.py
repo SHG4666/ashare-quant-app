@@ -488,47 +488,117 @@ def run_stock_pool_scan_for_symbols(symbols: list[str], progress_callback=None) 
 
 
 def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
+    up_color = "#e53935"
+    down_color = "#0a9b68"
+    ma_colors = {5: "#d99100", 10: "#2468d8", 20: "#9b51c7"}
+    dates = pd.to_datetime(result["date"])
+    closes = pd.to_numeric(result["close"], errors="coerce")
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
     fig.add_trace(
         go.Candlestick(
-            x=result["date"],
+            x=dates,
             open=result["open"],
             high=result["high"],
             low=result["low"],
             close=result["close"],
             name="K线",
-            increasing_line_color="#b42318",
-            decreasing_line_color="#137333",
+            increasing_line_color=up_color,
+            increasing_fillcolor=up_color,
+            decreasing_line_color=down_color,
+            decreasing_fillcolor=down_color,
+            whiskerwidth=0.35,
         ),
         row=1,
         col=1,
     )
+
+    ma_series: dict[int, pd.Series] = {10: closes.rolling(10, min_periods=10).mean()}
     if strategy_name == "双均线交叉":
-        fig.add_trace(go.Scatter(x=result["date"], y=result["ma_short"], name=f"MA{short_window}", line={"color": "#2457a6", "width": 1.5}), row=1, col=1)
-        fig.add_trace(go.Scatter(x=result["date"], y=result["ma_long"], name=f"MA{long_window}", line={"color": "#d97706", "width": 1.5}), row=1, col=1)
-    elif strategy_name == "布林带均值回归":
+        ma_series[short_window] = result["ma_short"]
+        ma_series[long_window] = result["ma_long"]
+    ordered_ma_windows = list(dict.fromkeys([short_window, 10, long_window])) if strategy_name == "双均线交叉" else [10]
+    fallback_ma_colors = ["#d99100", "#2468d8", "#9b51c7", "#0089a7"]
+    for index, window in enumerate(ordered_ma_windows):
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=ma_series[window],
+                mode="lines",
+                name=f"MA{window}",
+                line={"color": ma_colors.get(window, fallback_ma_colors[index % len(fallback_ma_colors)]), "width": 1.45},
+                hovertemplate=f"MA{window} %{{y:.2f}}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+
+    if strategy_name == "布林带均值回归":
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_middle"], name="中轨", line={"color": "#2457a6", "width": 1.4}), row=1, col=1)
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_upper"], name="上轨", line={"color": "#9aa0a6", "dash": "dot"}), row=1, col=1)
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_lower"], name="下轨", line={"color": "#9aa0a6", "dash": "dot"}), row=1, col=1)
     if not trades.empty:
         buys = trades[trades["action"] == "BUY"]
         sells = trades[trades["action"] == "SELL"]
-        fig.add_trace(go.Scatter(x=buys["date"], y=buys["price"], mode="markers", name="买入", marker={"symbol": "triangle-up", "size": 10, "color": "#b42318"}), row=1, col=1)
-        fig.add_trace(go.Scatter(x=sells["date"], y=sells["price"], mode="markers", name="卖出", marker={"symbol": "triangle-down", "size": 10, "color": "#137333"}), row=1, col=1)
-    volume_colors = ["#b42318" if close >= open_ else "#137333" for open_, close in zip(result["open"], result["close"])]
-    fig.add_trace(go.Bar(x=result["date"], y=result["volume"], name="成交量", marker_color=volume_colors, opacity=0.55), row=2, col=1)
+        fig.add_trace(go.Scatter(x=buys["date"], y=buys["price"], mode="markers", name="买入", marker={"symbol": "triangle-up", "size": 10, "color": up_color}), row=1, col=1)
+        fig.add_trace(go.Scatter(x=sells["date"], y=sells["price"], mode="markers", name="卖出", marker={"symbol": "triangle-down", "size": 10, "color": down_color}), row=1, col=1)
+    volume_colors = [up_color if close >= open_ else down_color for open_, close in zip(result["open"], result["close"])]
+    fig.add_trace(
+        go.Bar(
+            x=dates,
+            y=result["volume"],
+            name="成交量",
+            marker_color=volume_colors,
+            opacity=0.72,
+            hovertemplate="%{x|%Y-%m-%d}<br>成交量 %{y:,.0f}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+
+    latest_close = float(closes.iloc[-1])
+    latest_color = up_color if float(result["close"].iloc[-1]) >= float(result["open"].iloc[-1]) else down_color
+    fig.add_hline(
+        y=latest_close,
+        row=1,
+        col=1,
+        line={"color": latest_color, "width": 1, "dash": "dot"},
+        annotation_text=f"{latest_close:.2f}",
+        annotation_position="right",
+        annotation_font={"color": latest_color, "size": 11},
+    )
+
+    market_dates = pd.DatetimeIndex(dates.dt.normalize().unique())
+    weekday_dates = pd.date_range(market_dates.min(), market_dates.max(), freq="B")
+    market_holidays = weekday_dates.difference(market_dates)
     fig.update_layout(
         template="plotly_white",
-        height=560,
-        margin={"l": 16, "r": 16, "t": 20, "b": 10},
+        height=610,
+        margin={"l": 12, "r": 62, "t": 32, "b": 12},
         xaxis_rangeslider_visible=False,
-        hovermode="x unified",
-        legend={"orientation": "h", "y": 1.03, "x": 0},
+        hovermode="x",
+        hoverdistance=40,
+        spikedistance=-1,
+        legend={"orientation": "h", "y": 1.025, "x": 0, "font": {"size": 12}},
+        font={"family": "Arial, Microsoft YaHei, sans-serif", "color": "#38434d"},
+        hoverlabel={"bgcolor": "#ffffff", "bordercolor": "#cfd6dc", "font": {"color": "#182026"}},
         paper_bgcolor="#ffffff",
         plot_bgcolor="#ffffff",
+        bargap=0.18,
     )
-    fig.update_yaxes(title_text="价格", row=1, col=1, gridcolor="#eef0f2")
-    fig.update_yaxes(title_text="成交量", row=2, col=1, gridcolor="#eef0f2")
+    fig.update_xaxes(
+        rangebreaks=[{"bounds": ["sat", "mon"]}, {"values": market_holidays}],
+        showgrid=True,
+        gridcolor="#edf0f2",
+        gridwidth=1,
+        showspikes=True,
+        spikecolor="#7f8b94",
+        spikethickness=1,
+        spikedash="dot",
+        spikesnap="cursor",
+        tickformat="%m-%d",
+    )
+    fig.update_yaxes(title_text="价格", side="right", tickformat=".2f", row=1, col=1, gridcolor="#e7eaed", zeroline=False, fixedrange=False)
+    fig.update_yaxes(title_text="成交量", side="right", tickformat="~s", row=2, col=1, gridcolor="#eef0f2", zeroline=False, fixedrange=False)
     return fig
 
 

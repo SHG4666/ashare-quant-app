@@ -10,6 +10,19 @@ def test_app_displays_data_status_latest_trade_day_and_price_basis():
     assert "aq-status-strip" in source
 
 
+def test_app_price_chart_uses_china_market_colors_and_always_shows_ma10():
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'up_color = "#e53935"' in source
+    assert 'down_color = "#0a9b68"' in source
+    assert "increasing_fillcolor=up_color" in source
+    assert "decreasing_fillcolor=down_color" in source
+    assert 'name=f"MA{window}"' in source
+    assert "closes.rolling(10" in source
+    assert 'side="right"' in source
+    assert '"bounds": ["sat", "mon"]' in source
+
+
 def test_app_exposes_human_friendly_watchlist_navigation_and_refresh_feedback():
     source = Path("app.py").read_text(encoding="utf-8")
 
