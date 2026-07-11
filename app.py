@@ -387,6 +387,57 @@ st.markdown(
         border-color: var(--accent) !important;
         color: var(--accent) !important;
     }
+    /* Streamlit 1.50+ uses React Aria instead of BaseWeb for these controls. */
+    [data-testid="stSelectbox"] [role="group"],
+    [data-testid="stTextInputRootElement"],
+    [data-testid="stNumberInputContainer"] {
+        background: var(--input) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 5px !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stSelectbox"] input,
+    [data-testid="stTextInputRootElement"] input,
+    [data-testid="stNumberInputField"] {
+        background: transparent !important;
+        color: var(--ink) !important;
+        -webkit-text-fill-color: var(--ink) !important;
+    }
+    [data-testid="stSelectbox"] [role="group"] > button {
+        background: transparent !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stSelectbox"] [role="group"] svg,
+    [data-testid="stNumberInputContainer"] svg {
+        color: var(--ink) !important;
+        fill: currentColor !important;
+    }
+    [data-testid="stSelectboxVirtualDropdown"] {
+        background: var(--paper) !important;
+        border: 1px solid var(--line) !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stSelectboxVirtualDropdown"] [role="option"] {
+        color: var(--ink) !important;
+    }
+    [data-testid="stSelectboxVirtualDropdown"] [role="option"][data-selected="true"],
+    [data-testid="stSelectboxVirtualDropdown"] [role="option"]:hover {
+        background: var(--surface-muted) !important;
+    }
+    [data-testid="stButtonGroup"] button[data-variant="segmented_control"] {
+        background: var(--paper) !important;
+        border-color: var(--line) !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stButtonGroup"] button[data-variant="segmented_control"][data-selected="true"],
+    [data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {
+        background: var(--surface-muted) !important;
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+    }
+    [data-testid="stButtonGroup"] button[data-variant="segmented_control"] p {
+        color: inherit !important;
+    }
     [data-baseweb="base-input"] { background: var(--input) !important; color: var(--ink) !important; }
     [data-baseweb="input"] input { background: transparent !important; }
     [data-baseweb="select"] div,
