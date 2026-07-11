@@ -1,0 +1,20 @@
+.DS_Store
+.idea/
+.pytest_cache/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+uv.lock
+
+# Runtime caches and personal journals are local-only. The default watchlist is
+# intentionally tracked so a fresh cloud deployment has useful starter data.
+data_cache/*
+!data_cache/watchlist.txt
+
+# Local databases and secrets must never be committed.
+*.db
+*.sqlite
+*.sqlite3
+.streamlit/secrets.toml
+.env
