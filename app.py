@@ -22,7 +22,8 @@ from ashare_quant.backtest import (
     summarize_backtest,
     yearly_return_table,
 )
-from ashare_quant.charting import aggregate_price_bars, default_visible_bar_range
+from ashare_quant.chart_viewport import default_visible_bar_range
+from ashare_quant.charting import aggregate_price_bars
 from ashare_quant.data import (
     fetch_ashare_daily,
     fetch_latest_market_quote,

@@ -1,6 +1,7 @@
 import pandas as pd
 
-from ashare_quant.charting import aggregate_price_bars, default_visible_bar_range
+from ashare_quant.chart_viewport import default_visible_bar_range
+from ashare_quant.charting import aggregate_price_bars
 from ashare_quant.ui_helpers import (
     indicator_display_columns,
     normalize_ashare_symbol,
