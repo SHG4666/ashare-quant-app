@@ -534,6 +534,7 @@ def load_data_cached(symbol: str, start: date, end: date, adjust: str, use_demo:
     if use_demo:
         demo = make_demo_data()
         demo.attrs["source_name"] = "离线演示数据"
+        demo.attrs["price_verified"] = False
         return demo
     return fetch_ashare_daily(symbol, start, end, adjust)
 
@@ -1061,8 +1062,17 @@ metric_cols[1].metric(f"当前信号 · {signal_action}", signal_label)
 metric_cols[2].metric("策略总收益", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
 metric_cols[3].metric("最大回撤", f"{summary['max_drawdown_pct']:.2f}%")
 metric_cols[4].metric(f"夏普比率 · {summary['trade_count']}次交易", f"{summary['sharpe']:.2f}")
-status_label = "数据可能滞后" if data_status["is_stale"] else "数据已校验"
-status_tone = "stale" if data_status["is_stale"] else ""
+is_static_backup = bool(data.attrs.get("is_static_backup", False))
+price_verified = bool(data.attrs.get("price_verified", not use_demo))
+if data_status["is_stale"]:
+    status_label = "数据可能滞后"
+elif is_static_backup:
+    status_label = "静态备份 · 非实时"
+elif not price_verified:
+    status_label = "数据待核验"
+else:
+    status_label = "数据已校验"
+status_tone = "stale" if data_status["is_stale"] or not price_verified else ""
 quote_mode = "实时行情" if quote else "历史收盘"
 quote_detail = (
     f'{quote.get("price_basis")} · {quote.get("source_name")} · {quote_time_label}'
@@ -1079,6 +1089,8 @@ st.markdown(
 )
 if data_status["is_stale"]:
     st.warning(f"历史行情距请求结束日约 {data_status['staleness_days']} 个工作日，请先确认数据源是否已经收盘更新。")
+elif is_static_backup:
+    st.warning("在线历史行情源暂时不可用，当前展示随应用发布的 baostock 前复权静态备份；请以标注的截止日期为准。")
 
 
 watchlist_save_toast = st.session_state.pop("watchlist_save_toast", "")

@@ -136,10 +136,37 @@ def adjustment_label(adjust: str) -> str:
     return {"qfq": "前复权", "hfq": "后复权", "": "不复权"}.get(adjust, "不复权")
 
 
-def with_data_source(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
-    """Attach a lightweight source label to a dataframe for UI/API status display."""
+def with_data_source(df: pd.DataFrame, source_name: str, *, price_verified: bool = True) -> pd.DataFrame:
+    """Attach source and verification metadata for UI/API status display."""
     df.attrs["source_name"] = source_name
+    df.attrs["price_verified"] = price_verified
     return df
+
+
+def validate_ohlcv_frame(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """Reject malformed bundled history before it can reach charts or backtests."""
+    required = ["date", "open", "high", "low", "close", "volume"]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(f"行情缺少字段：{missing}")
+
+    checked = df.copy()
+    checked["date"] = pd.to_datetime(checked["date"], errors="coerce")
+    for column in ["open", "high", "low", "close", "volume"]:
+        checked[column] = pd.to_numeric(checked[column], errors="coerce")
+    if checked[required].isna().any().any():
+        raise ValueError(f"{symbol} 行情包含空值或非数字字段")
+    if checked["date"].duplicated().any():
+        raise ValueError(f"{symbol} 行情包含重复交易日")
+    if (checked[["open", "high", "low", "close"]] <= 0).any().any() or (checked["volume"] < 0).any():
+        raise ValueError(f"{symbol} 行情包含无效价格或成交量")
+
+    price_max = checked[["open", "close"]].max(axis=1)
+    price_min = checked[["open", "close"]].min(axis=1)
+    invalid_bar = (checked["high"] < price_max) | (checked["low"] > price_min) | (checked["high"] < checked["low"])
+    if invalid_bar.any():
+        raise ValueError(f"{symbol} 行情包含不符合 OHLC 关系的数据")
+    return checked.sort_values("date").reset_index(drop=True)
 
 
 def is_recent_market_request(end: date, freshness_days: int = 3) -> bool:
@@ -286,14 +313,19 @@ def fetch_eastmoney_stock_name(symbol: str) -> str:
 
 def normalize_baostock_rows(rows: list[list[str]]) -> pd.DataFrame:
     """Normalize baostock query rows to the app OHLCV schema."""
-    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume", "amount"])
+    columns = ["date", "open", "high", "low", "close", "volume", "amount"]
+    if rows and len(rows[0]) == 8:
+        columns.append("tradestatus")
+    df = pd.DataFrame(rows, columns=columns)
     if df.empty:
         raise ValueError("baostock returned no rows")
+    if "tradestatus" in df.columns:
+        df = df[df["tradestatus"].astype(str) == "1"].drop(columns="tradestatus")
     df["date"] = pd.to_datetime(df["date"])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
-    return df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+    return df.dropna(subset=["date", "open", "high", "low", "close", "volume"]).sort_values("date").reset_index(drop=True)
 
 
 def fetch_baostock_daily(symbol: str, start: date, end: date, adjust: str = "") -> pd.DataFrame:
@@ -310,7 +342,7 @@ def fetch_baostock_daily(symbol: str, start: date, end: date, adjust: str = "") 
     try:
         rs = bs.query_history_k_data_plus(
             baostock_code(symbol),
-            "date,open,high,low,close,volume,amount",
+            "date,open,high,low,close,volume,amount,tradestatus",
             start_date=start.isoformat(),
             end_date=end.isoformat(),
             frequency="d",
@@ -508,26 +540,22 @@ def load_cloud_seed_daily(
     end: date,
     history_dir: str | Path = CLOUD_HISTORY_DIR,
 ) -> pd.DataFrame:
-    """Load a compact qfq-compatible history bundled for cloud deployment."""
+    """Load a static baostock qfq backup bundled for cloud deployment."""
     source = Path(history_dir) / f"{str(symbol).strip()}.csv"
     if not source.exists():
-        raise FileNotFoundError(f"云端种子行情不存在：{symbol}")
+        raise FileNotFoundError(f"云端静态备份不存在：{symbol}")
     df = pd.read_csv(source, parse_dates=["date"])
-    required = ["date", "open", "high", "low", "close", "volume"]
-    missing = [column for column in required if column not in df.columns]
-    if missing:
-        raise ValueError(f"云端种子行情缺少字段：{missing}")
+    df = validate_ohlcv_frame(df, str(symbol).strip())
     sliced = df[
         (pd.to_datetime(df["date"]) >= pd.Timestamp(start))
         & (pd.to_datetime(df["date"]) <= pd.Timestamp(end))
     ].copy()
     if sliced.empty:
-        raise ValueError(f"云端种子行情没有 {symbol} 在 {start} 到 {end} 的数据")
-    for column in ["open", "high", "low", "close", "volume"]:
-        sliced[column] = pd.to_numeric(sliced[column], errors="coerce")
-    sliced = sliced.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
-    sliced.attrs["source_name"] = "云端种子行情（前复权兼容）"
+        raise ValueError(f"云端静态备份没有 {symbol} 在 {start} 到 {end} 的数据")
+    sliced = sliced.reset_index(drop=True)
+    sliced.attrs["source_name"] = "静态备份（baostock 前复权）"
     sliced.attrs["price_verified"] = False
+    sliced.attrs["is_static_backup"] = True
     return sliced
 
 
@@ -670,14 +698,6 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
     if cache_file.exists() and not is_recent_market_request(end):
         return with_data_source(pd.read_csv(cache_file, parse_dates=["date"]), "本地baostock缓存")
 
-    # Streamlit Community Cloud does not have the user's local Sequoia-X DB.
-    # Bundled seed histories keep the default app and watchlist immediately usable.
-    if adjust == "qfq" and not SEQUOIA_DB_PATH.exists():
-        try:
-            return load_cloud_seed_daily(symbol, start, end)
-        except Exception:
-            pass
-
     try:
         df = fetch_baostock_daily(symbol, start, end, adjust)
         df.to_csv(cache_file, index=False)
@@ -722,6 +742,11 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
             cached = load_latest_symbol_cache(symbol, adjust)
             if cached is not None:
                 return with_data_source(cached, "本地历史缓存")
+            if adjust == "qfq":
+                try:
+                    return load_cloud_seed_daily(symbol, start, end)
+                except Exception:
+                    pass
             raise RuntimeError("在线数据源暂时不可用，且本地没有该股票缓存；请稍后重试或勾选离线演示数据。")
     df.to_csv(cache_file, index=False)
     return with_data_source(df, "AkShare/东方财富备用链路")

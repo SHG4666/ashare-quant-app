@@ -111,5 +111,57 @@ def test_load_cloud_seed_daily_slices_history_and_labels_source(tmp_path):
 
     assert len(result) == 2
     assert result.iloc[-1]["close"] == 11.3
-    assert "云端种子行情" in result.attrs["source_name"]
+    assert result.attrs["source_name"] == "静态备份（baostock 前复权）"
     assert result.attrs["price_verified"] is False
+    assert result.attrs["is_static_backup"] is True
+
+
+def test_load_cloud_seed_daily_rejects_duplicate_dates(tmp_path):
+    history_dir = tmp_path / "watchlist_history"
+    history_dir.mkdir()
+    pd.DataFrame(
+        {
+            "date": ["2026-07-10", "2026-07-10"],
+            "open": [10.0, 10.0],
+            "high": [11.0, 11.0],
+            "low": [9.0, 9.0],
+            "close": [10.5, 10.5],
+            "volume": [1000, 1000],
+        }
+    ).to_csv(history_dir / "600522.csv", index=False)
+
+    try:
+        data.load_cloud_seed_daily("600522", date(2026, 7, 10), date(2026, 7, 10), history_dir)
+    except ValueError as exc:
+        assert "重复交易日" in str(exc)
+    else:
+        raise AssertionError("expected duplicate-date validation failure")
+
+
+def test_recent_online_history_has_priority_over_static_backup(monkeypatch, tmp_path):
+    live = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-07-10"]),
+            "open": [47.34],
+            "high": [49.78],
+            "low": [45.89],
+            "close": [45.91],
+            "volume": [318389244.0],
+        }
+    )
+    monkeypatch.setattr(data, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(data, "SEQUOIA_DB_PATH", tmp_path / "missing.db")
+    monkeypatch.setattr(data, "is_mainland_market_session", lambda: False)
+    monkeypatch.setattr(data, "load_fresh_baostock_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(data, "fetch_baostock_daily", lambda *args, **kwargs: live)
+    monkeypatch.setattr(
+        data,
+        "load_cloud_seed_daily",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("static backup must not shadow live data")),
+    )
+
+    result = data.fetch_ashare_daily("600522", date(2026, 7, 1), date(2026, 7, 10), "qfq")
+
+    assert result.iloc[-1]["close"] == 45.91
+    assert result.attrs["source_name"] == "baostock"
+    assert result.attrs["price_verified"] is True

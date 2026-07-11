@@ -24,3 +24,15 @@ def test_normalize_baostock_rows_parses_ohlcv():
     assert list(df.columns[:6]) == ["date", "open", "high", "low", "close", "volume"]
     assert df.loc[0, "close"] == 51.58
     assert df.loc[0, "volume"] == 279141616
+
+
+def test_normalize_baostock_rows_removes_suspended_placeholders():
+    rows = [
+        ["2026-01-05", "78.52", "78.52", "78.52", "78.52", "", "", "0"],
+        ["2026-01-06", "79.00", "80.00", "78.00", "79.50", "1000", "79500", "1"],
+    ]
+
+    df = data.normalize_baostock_rows(rows)
+
+    assert df["date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-01-06"]
+    assert df["close"].tolist() == [79.5]
