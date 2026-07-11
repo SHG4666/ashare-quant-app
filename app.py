@@ -121,6 +121,73 @@ TABLE_LABELS = {
 
 
 st.set_page_config(page_title="A股量化研究台", page_icon="📊", layout="wide", initial_sidebar_state="auto")
+with st.sidebar:
+    st.markdown('<div class="aq-brand"><span class="aq-brand-mark"></span>A股量化研究台</div>', unsafe_allow_html=True)
+    st.caption("盘后研究与交易计划")
+    dark_mode = st.toggle("深色模式", value=False, key="dark_mode")
+    st.divider()
+
+SOFT_THEME = {
+    "ink": "#1b252b",
+    "muted": "#607078",
+    "line": "#ccd4d8",
+    "line-strong": "#b5c0c5",
+    "paper": "#f7f8f7",
+    "canvas": "#e9edef",
+    "sidebar": "#f0f3f3",
+    "body-text": "#46545c",
+    "pill": "#e5eaec",
+    "surface-muted": "#f2f4f3",
+    "input": "#f8f9f8",
+    "accent": "#b42318",
+    "accent-dark": "#8f1d15",
+    "positive": "#e53935",
+    "negative": "#0a9b68",
+    "blue": "#2457a6",
+    "amber": "#a15c00",
+    "shadow": "rgba(24, 32, 38, 0.04)",
+    "plot": "#f7f8f7",
+    "grid": "#dfe5e7",
+    "hover": "#f7f8f7",
+    "plot-font": "#354249",
+    "table-filter": "none",
+}
+DARK_THEME = {
+    "ink": "#e7ecef",
+    "muted": "#a4afb6",
+    "line": "#384045",
+    "line-strong": "#505a61",
+    "paper": "#22272b",
+    "canvas": "#171b1e",
+    "sidebar": "#1c2023",
+    "body-text": "#b7c0c6",
+    "pill": "#2d3439",
+    "surface-muted": "#252b2f",
+    "input": "#242a2e",
+    "accent": "#e0544d",
+    "accent-dark": "#bc4039",
+    "positive": "#ff5b55",
+    "negative": "#22c58b",
+    "blue": "#75a7ff",
+    "amber": "#e7aa50",
+    "shadow": "rgba(0, 0, 0, 0.24)",
+    "plot": "#202529",
+    "grid": "#343c41",
+    "hover": "#2a3035",
+    "plot-font": "#dde4e8",
+    "table-filter": "invert(0.88) hue-rotate(180deg) saturate(0.8)",
+}
+UI_THEME = DARK_THEME if dark_mode else SOFT_THEME
+CHART_THEME = {
+    "template": "plotly_dark" if dark_mode else "plotly_white",
+    "paper": UI_THEME["plot"],
+    "plot": UI_THEME["plot"],
+    "grid": UI_THEME["grid"],
+    "font": UI_THEME["plot-font"],
+    "hover": UI_THEME["hover"],
+    "line": UI_THEME["line"],
+    "navigator": UI_THEME["surface-muted"],
+}
 st.markdown(
     """
     <style>
@@ -142,11 +209,14 @@ st.markdown(
         --soft-green: #eaf7f1;
     }
     .stApp { background: var(--canvas); color: var(--ink); }
+    [data-testid="stHeader"] { background: var(--canvas) !important; color: var(--ink) !important; }
+    [data-testid="stHeader"] button,
+    [data-testid="stHeader"] svg { color: var(--ink) !important; fill: currentColor !important; }
     .block-container { max-width: 1460px; padding-top: 1.15rem; padding-bottom: 3.5rem; }
     section[data-testid="stSidebar"] {
-        background: #fbfcfc;
+        background: var(--sidebar);
         border-right: 1px solid var(--line);
-        box-shadow: 8px 0 24px rgba(29, 42, 51, 0.025);
+        box-shadow: 8px 0 24px var(--shadow);
     }
     section[data-testid="stSidebar"] .block-container { padding-top: 1.1rem; }
     section[data-testid="stSidebar"] label,
@@ -161,6 +231,7 @@ st.markdown(
     h2 { font-size: 1.3rem; }
     h3 { font-size: 1.05rem; }
     p { line-height: 1.55; }
+    [data-testid="stWidgetLabel"] p { color: var(--ink) !important; }
     [data-testid="stMetric"] {
         background: var(--paper);
         border: 1px solid var(--line);
@@ -210,7 +281,7 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 4px;
         background: var(--paper);
-        color: #46525b;
+        color: var(--body-text);
         font-size: 0.76rem;
         font-weight: 620;
     }
@@ -238,7 +309,7 @@ st.markdown(
         border: 1px solid var(--line);
         border-radius: 6px;
         background: var(--paper);
-        color: #53606a;
+        color: var(--body-text);
         font-size: 0.78rem;
     }
     .aq-status-strip strong { color: var(--ink); }
@@ -247,8 +318,8 @@ st.markdown(
     .aq-status-pill {
         padding: 0.14rem 0.42rem;
         border-radius: 3px;
-        background: #f0f3f5;
-        color: #43515b;
+        background: var(--pill);
+        color: var(--body-text);
         font-weight: 620;
     }
     .aq-section-head { margin: 0.2rem 0 0.72rem; }
@@ -270,26 +341,68 @@ st.markdown(
         border-radius: 5px;
         font-weight: 650;
     }
+    div[data-testid="stButton"] > button:not([kind="primary"]),
+    div[data-testid="stDownloadButton"] > button {
+        background: var(--paper);
+        border-color: var(--line);
+        color: var(--ink);
+    }
     div[data-baseweb="tab-list"] {
         gap: 1.25rem;
         border-bottom: 1px solid var(--line);
         background: var(--canvas);
     }
-    button[data-baseweb="tab"] { padding: 0.55rem 0.08rem 0.62rem; font-weight: 650; }
+    button[data-baseweb="tab"] {
+        padding: 0.55rem 0.08rem 0.62rem;
+        font-weight: 650;
+        color: var(--muted) !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] { color: var(--accent) !important; }
     [data-testid="stDataFrame"] {
         border: 1px solid var(--line);
         border-radius: 6px;
         overflow: hidden;
         background: var(--paper);
+        filter: var(--table-filter);
     }
     [data-testid="stExpander"] {
         border-color: var(--line) !important;
         border-radius: 6px !important;
-        background: rgba(255, 255, 255, 0.65);
+        background: var(--surface-muted);
     }
     [data-baseweb="input"], [data-baseweb="select"] > div {
         border-color: var(--line) !important;
         border-radius: 5px !important;
+        background: var(--input) !important;
+    }
+    [data-baseweb="input"] input,
+    [data-baseweb="select"] span { color: var(--ink) !important; -webkit-text-fill-color: var(--ink) !important; }
+    [data-testid="stButtonGroup"] [data-testid="stBaseButton-segmented_control"] {
+        background: var(--paper) !important;
+        border-color: var(--line) !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stButtonGroup"] [data-testid="stBaseButton-segmented_controlActive"] {
+        background: var(--surface-muted) !important;
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+    }
+    [data-baseweb="base-input"] { background: var(--input) !important; color: var(--ink) !important; }
+    [data-baseweb="input"] input { background: transparent !important; }
+    [data-baseweb="select"] div,
+    [data-baseweb="select"] p,
+    [data-baseweb="select"] svg { color: var(--ink) !important; fill: currentColor !important; }
+    [data-testid="stNumberInputStepDown"],
+    [data-testid="stNumberInputStepUp"] {
+        background: var(--pill) !important;
+        border-color: var(--line) !important;
+        color: var(--ink) !important;
+    }
+    [data-testid="stExpander"] details,
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpanderDetails"] {
+        background: transparent !important;
+        color: var(--ink) !important;
     }
     [data-testid="stAlert"] { border-radius: 6px; }
     @media (max-width: 760px) {
@@ -304,6 +417,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+theme_variables = ";".join(f"--{name}: {value}" for name, value in UI_THEME.items())
+st.markdown("<style>:root {" + theme_variables + "}</style>", unsafe_allow_html=True)
 
 
 def display_table(df: pd.DataFrame, columns: list[str] | None = None, height: int | None = None) -> None:
@@ -596,7 +711,7 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
     )
 
     fig.update_layout(
-        template="plotly_white",
+        template=CHART_THEME["template"],
         height=660 if navigator_visible else 610,
         margin={"l": 12, "r": 62, "t": 32, "b": 18},
         xaxis_rangeslider_visible=False,
@@ -604,17 +719,17 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
         hovermode="x",
         hoverdistance=40,
         spikedistance=-1,
-        legend={"orientation": "h", "y": 1.025, "x": 0, "font": {"size": 12}},
-        font={"family": "Arial, Microsoft YaHei, sans-serif", "color": "#38434d"},
-        hoverlabel={"bgcolor": "#ffffff", "bordercolor": "#cfd6dc", "font": {"color": "#182026"}},
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
+        legend={"orientation": "h", "y": 1.025, "x": 0, "font": {"size": 12, "color": CHART_THEME["font"]}},
+        font={"family": "Arial, Microsoft YaHei, sans-serif", "color": CHART_THEME["font"]},
+        hoverlabel={"bgcolor": CHART_THEME["hover"], "bordercolor": CHART_THEME["line"], "font": {"color": CHART_THEME["font"]}},
+        paper_bgcolor=CHART_THEME["paper"],
+        plot_bgcolor=CHART_THEME["plot"],
         bargap=0.18,
     )
     xaxis_options: dict[str, object] = {
         "type": "date" if period == "日K" else "category",
         "showgrid": True,
-        "gridcolor": "#edf0f2",
+        "gridcolor": CHART_THEME["grid"],
         "gridwidth": 1,
         "showspikes": True,
         "spikecolor": "#7f8b94",
@@ -637,15 +752,15 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
         rangeslider={
             "visible": navigator_visible,
             "thickness": 0.075,
-            "bgcolor": "#f6f8f9",
-            "bordercolor": "#dce2e6",
+            "bgcolor": CHART_THEME["navigator"],
+            "bordercolor": CHART_THEME["line"],
             "borderwidth": 1,
         },
         row=2,
         col=1,
     )
-    fig.update_yaxes(title_text="价格", side="right", tickformat=".2f", row=1, col=1, gridcolor="#e7eaed", zeroline=False, fixedrange=False)
-    fig.update_yaxes(title_text="成交量", side="right", tickformat="~s", row=2, col=1, gridcolor="#eef0f2", zeroline=False, fixedrange=False)
+    fig.update_yaxes(title_text="价格", side="right", tickformat=".2f", row=1, col=1, gridcolor=CHART_THEME["grid"], zeroline=False, fixedrange=False)
+    fig.update_yaxes(title_text="成交量", side="right", tickformat="~s", row=2, col=1, gridcolor=CHART_THEME["grid"], zeroline=False, fixedrange=False)
     return fig
 
 
@@ -663,7 +778,17 @@ def build_indicator_figure(result: pd.DataFrame) -> go.Figure | None:
         fig.add_trace(go.Scatter(x=result["date"], y=result["macd_dea"], name="DEA", line={"color": "#d97706"}))
     else:
         return None
-    fig.update_layout(template="plotly_white", height=260, margin={"l": 16, "r": 16, "t": 16, "b": 10}, hovermode="x unified")
+    fig.update_layout(
+        template=CHART_THEME["template"],
+        height=260,
+        margin={"l": 16, "r": 16, "t": 16, "b": 10},
+        hovermode="x unified",
+        paper_bgcolor=CHART_THEME["paper"],
+        plot_bgcolor=CHART_THEME["plot"],
+        font={"color": CHART_THEME["font"]},
+        legend={"font": {"color": CHART_THEME["font"]}},
+    )
+    fig.update_yaxes(gridcolor=CHART_THEME["grid"])
     return fig
 
 
@@ -675,9 +800,6 @@ if st.session_state.get("quick_watchlist_symbol", "") not in {"", *watchlist_sym
 
 
 with st.sidebar:
-    st.markdown('<div class="aq-brand"><span class="aq-brand-mark"></span>A股量化研究台</div>', unsafe_allow_html=True)
-    st.caption("盘后研究与交易计划")
-    st.divider()
     if watchlist_symbols:
         sidebar_names = {item.symbol: item.name for item in watchlist_entries}
         st.selectbox(
@@ -933,9 +1055,20 @@ with overview_tab:
 
     st.subheader("策略权益与基准")
     equity_fig = go.Figure()
-    equity_fig.add_trace(go.Scatter(x=result["date"], y=result["equity"], name="策略权益", line={"color": "#b42318", "width": 2}))
-    equity_fig.add_trace(go.Scatter(x=result["date"], y=result["benchmark_equity"], name="买入持有", line={"color": "#687078", "dash": "dash"}))
-    equity_fig.update_layout(template="plotly_white", height=330, margin={"l": 16, "r": 16, "t": 16, "b": 10}, hovermode="x unified")
+    equity_fig.add_trace(go.Scatter(x=result["date"], y=result["equity"], name="策略权益", line={"color": UP_COLOR, "width": 2}))
+    equity_fig.add_trace(go.Scatter(x=result["date"], y=result["benchmark_equity"], name="买入持有", line={"color": UI_THEME["muted"], "dash": "dash"}))
+    equity_fig.update_layout(
+        template=CHART_THEME["template"],
+        height=330,
+        margin={"l": 16, "r": 16, "t": 16, "b": 10},
+        hovermode="x unified",
+        paper_bgcolor=CHART_THEME["paper"],
+        plot_bgcolor=CHART_THEME["plot"],
+        font={"color": CHART_THEME["font"]},
+        legend={"font": {"color": CHART_THEME["font"]}},
+    )
+    equity_fig.update_xaxes(gridcolor=CHART_THEME["grid"])
+    equity_fig.update_yaxes(gridcolor=CHART_THEME["grid"])
     st.plotly_chart(equity_fig, use_container_width=True, config=PLOT_CONFIG)
 
     st.subheader("近期信号")

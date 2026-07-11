@@ -48,6 +48,18 @@ def test_app_uses_china_market_colors_for_metric_deltas():
     assert '当前信号 · {signal_action}' in source
 
 
+def test_app_exposes_soft_and_dark_theme_switching_for_ui_and_charts():
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'st.toggle("深色模式"' in source
+    assert "SOFT_THEME" in source
+    assert "DARK_THEME" in source
+    assert '"template": "plotly_dark" if dark_mode else "plotly_white"' in source
+    assert 'template=CHART_THEME["template"]' in source
+    assert 'background: var(--sidebar)' in source
+    assert 'background: var(--input)' in source
+
+
 def test_app_exposes_human_friendly_watchlist_navigation_and_refresh_feedback():
     source = Path("app.py").read_text(encoding="utf-8")
 
