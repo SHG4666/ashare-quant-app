@@ -45,6 +45,7 @@ from ashare_quant.review_journal import (
 from ashare_quant.scanner import apply_latest_quotes_to_candidates, scan_stock_pool
 from ashare_quant.trade_plan import generate_trade_plan
 from ashare_quant.ui_helpers import (
+    aggregate_price_bars,
     indicator_display_columns,
     normalize_ashare_symbol,
     parse_portfolio_symbols,
@@ -487,21 +488,22 @@ def run_stock_pool_scan_for_symbols(symbols: list[str], progress_callback=None) 
     return scan_result
 
 
-def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
+def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str = "日K") -> go.Figure:
     up_color = "#e53935"
     down_color = "#0a9b68"
     ma_colors = {5: "#d99100", 10: "#2468d8", 20: "#9b51c7"}
-    dates = pd.to_datetime(result["date"])
-    closes = pd.to_numeric(result["close"], errors="coerce")
+    chart_data = aggregate_price_bars(result, period)
+    dates = pd.to_datetime(chart_data["date"])
+    closes = pd.to_numeric(chart_data["close"], errors="coerce")
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
     fig.add_trace(
         go.Candlestick(
             x=dates,
-            open=result["open"],
-            high=result["high"],
-            low=result["low"],
-            close=result["close"],
-            name="K线",
+            open=chart_data["open"],
+            high=chart_data["high"],
+            low=chart_data["low"],
+            close=chart_data["close"],
+            name=period,
             increasing_line_color=up_color,
             increasing_fillcolor=up_color,
             decreasing_line_color=down_color,
@@ -512,40 +514,34 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
         col=1,
     )
 
-    ma_series: dict[int, pd.Series] = {10: closes.rolling(10, min_periods=10).mean()}
-    if strategy_name == "双均线交叉":
-        ma_series[short_window] = result["ma_short"]
-        ma_series[long_window] = result["ma_long"]
-    ordered_ma_windows = list(dict.fromkeys([short_window, 10, long_window])) if strategy_name == "双均线交叉" else [10]
-    fallback_ma_colors = ["#d99100", "#2468d8", "#9b51c7", "#0089a7"]
-    for index, window in enumerate(ordered_ma_windows):
+    for window in (5, 10, 20):
         fig.add_trace(
             go.Scatter(
                 x=dates,
-                y=ma_series[window],
+                y=closes.rolling(window, min_periods=window).mean(),
                 mode="lines",
                 name=f"MA{window}",
-                line={"color": ma_colors.get(window, fallback_ma_colors[index % len(fallback_ma_colors)]), "width": 1.45},
+                line={"color": ma_colors[window], "width": 1.45},
                 hovertemplate=f"MA{window} %{{y:.2f}}<extra></extra>",
             ),
             row=1,
             col=1,
         )
 
-    if strategy_name == "布林带均值回归":
+    if strategy_name == "布林带均值回归" and period == "日K":
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_middle"], name="中轨", line={"color": "#2457a6", "width": 1.4}), row=1, col=1)
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_upper"], name="上轨", line={"color": "#9aa0a6", "dash": "dot"}), row=1, col=1)
         fig.add_trace(go.Scatter(x=result["date"], y=result["bb_lower"], name="下轨", line={"color": "#9aa0a6", "dash": "dot"}), row=1, col=1)
-    if not trades.empty:
+    if period == "日K" and not trades.empty:
         buys = trades[trades["action"] == "BUY"]
         sells = trades[trades["action"] == "SELL"]
         fig.add_trace(go.Scatter(x=buys["date"], y=buys["price"], mode="markers", name="买入", marker={"symbol": "triangle-up", "size": 10, "color": up_color}), row=1, col=1)
         fig.add_trace(go.Scatter(x=sells["date"], y=sells["price"], mode="markers", name="卖出", marker={"symbol": "triangle-down", "size": 10, "color": down_color}), row=1, col=1)
-    volume_colors = [up_color if close >= open_ else down_color for open_, close in zip(result["open"], result["close"])]
+    volume_colors = [up_color if close >= open_ else down_color for open_, close in zip(chart_data["open"], chart_data["close"])]
     fig.add_trace(
         go.Bar(
             x=dates,
-            y=result["volume"],
+            y=chart_data["volume"],
             name="成交量",
             marker_color=volume_colors,
             opacity=0.72,
@@ -556,7 +552,7 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
     )
 
     latest_close = float(closes.iloc[-1])
-    latest_color = up_color if float(result["close"].iloc[-1]) >= float(result["open"].iloc[-1]) else down_color
+    latest_color = up_color if float(chart_data["close"].iloc[-1]) >= float(chart_data["open"].iloc[-1]) else down_color
     fig.add_hline(
         y=latest_close,
         row=1,
@@ -595,7 +591,7 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame) -> go.Figure:
         spikethickness=1,
         spikedash="dot",
         spikesnap="cursor",
-        tickformat="%m-%d",
+        tickformat={"日K": "%m-%d", "周K": "%m-%d", "月K": "%Y-%m", "年K": "%Y"}[period],
     )
     fig.update_yaxes(title_text="价格", side="right", tickformat=".2f", row=1, col=1, gridcolor="#e7eaed", zeroline=False, fixedrange=False)
     fig.update_yaxes(title_text="成交量", side="right", tickformat="~s", row=2, col=1, gridcolor="#eef0f2", zeroline=False, fixedrange=False)
@@ -871,7 +867,14 @@ overview_tab, backtest_tab, scanner_tab, review_tab = st.tabs(
 
 with overview_tab:
     st.subheader("价格、指标与买卖点")
-    st.plotly_chart(build_price_figure(result, trades), use_container_width=True, config=PLOT_CONFIG)
+    chart_period = st.segmented_control(
+        "K线周期",
+        ["日K", "周K", "月K", "年K"],
+        default="日K",
+        selection_mode="single",
+        key="price_chart_period",
+    ) or "日K"
+    st.plotly_chart(build_price_figure(result, trades, chart_period), use_container_width=True, config=PLOT_CONFIG)
     indicator_fig = build_indicator_figure(result)
     if indicator_fig is not None:
         st.plotly_chart(indicator_fig, use_container_width=True, config=PLOT_CONFIG)

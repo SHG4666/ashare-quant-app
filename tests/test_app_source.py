@@ -18,9 +18,11 @@ def test_app_price_chart_uses_china_market_colors_and_always_shows_ma10():
     assert "increasing_fillcolor=up_color" in source
     assert "decreasing_fillcolor=down_color" in source
     assert 'name=f"MA{window}"' in source
-    assert "closes.rolling(10" in source
+    assert "for window in (5, 10, 20)" in source
     assert 'side="right"' in source
     assert '"bounds": ["sat", "mon"]' in source
+    assert '["日K", "周K", "月K", "年K"]' in source
+    assert "aggregate_price_bars(result, period)" in source
 
 
 def test_app_exposes_human_friendly_watchlist_navigation_and_refresh_feedback():
