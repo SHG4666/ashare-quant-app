@@ -244,13 +244,8 @@ def summarize_price_data_status(
     }
 
 
-def fetch_latest_market_quote(symbol: str) -> dict[str, object]:
-    """Return the latest unadjusted market bar for a compact current-price card.
-
-    A quote is deliberately separate from adjusted history. Mixing an unadjusted
-    realtime series into a qfq/hfq backtest can create artificial jumps around
-    dividends and splits.
-    """
+def fetch_eastmoney_latest_market_quote(symbol: str) -> dict[str, object]:
+    """Return Eastmoney's latest unadjusted market bar."""
     params = {
         "secid": eastmoney_secid(symbol),
         "fields": "f43,f44,f45,f46,f47,f57,f58,f59,f60,f86",
@@ -276,7 +271,11 @@ def fetch_latest_market_quote(symbol: str) -> dict[str, object]:
         return float(raw) / scale
 
     timestamp = payload.get("f86")
-    quote_time = pd.to_datetime(int(timestamp), unit="s") if timestamp else pd.Timestamp.now()
+    quote_time = (
+        pd.to_datetime(int(timestamp), unit="s", utc=True).tz_convert("Asia/Shanghai").tz_localize(None)
+        if timestamp
+        else pd.Timestamp.now()
+    )
     return {
         "symbol": symbol,
         "name": str(payload.get("f58") or "").strip(),
@@ -290,6 +289,22 @@ def fetch_latest_market_quote(symbol: str) -> dict[str, object]:
         "source_name": "东方财富实时行情",
         "price_basis": "不复权实时价",
     }
+
+
+def fetch_latest_market_quote(symbol: str) -> dict[str, object]:
+    """Return a current unadjusted A-share bar with a second-source fallback."""
+    try:
+        return fetch_eastmoney_latest_market_quote(symbol)
+    except Exception as eastmoney_error:
+        try:
+            quote = fetch_tencent_stock_quotes([symbol]).get(str(symbol).strip())
+            if not quote or not quote.get("price") or not quote.get("quote_time"):
+                raise ValueError(f"Tencent returned no complete quote for {symbol}")
+            return quote
+        except Exception as tencent_error:
+            raise RuntimeError(
+                f"最新行情暂不可用（东方财富：{eastmoney_error}；腾讯：{tencent_error}）"
+            ) from tencent_error
 
 
 def fetch_eastmoney_stock_name(symbol: str) -> str:
@@ -443,11 +458,27 @@ def normalize_tencent_stock_quotes(raw: str) -> dict[str, dict[str, object]]:
                 return None
             return value if value > 0 else None
 
+        def parse_quote_time() -> pd.Timestamp | None:
+            if len(fields) <= 30:
+                return None
+            raw_time = str(fields[30]).strip()
+            if len(raw_time) != 14 or not raw_time.isdigit():
+                return None
+            parsed = pd.to_datetime(raw_time, format="%Y%m%d%H%M%S", errors="coerce")
+            return None if pd.isna(parsed) else parsed
+
+        volume_hands = parse_price(36) or parse_price(6)
+
         quotes[symbol] = {
             "symbol": symbol,
             "name": name,
             "price": parse_price(3),
             "previous_close": parse_price(4),
+            "open": parse_price(5),
+            "high": parse_price(33),
+            "low": parse_price(34),
+            "volume": volume_hands * 100 if volume_hands is not None else None,
+            "quote_time": parse_quote_time(),
             "source_name": "腾讯批量行情（不复权）",
             "price_basis": "正常市场价格",
         }
@@ -557,6 +588,80 @@ def load_cloud_seed_daily(
     sliced.attrs["price_verified"] = False
     sliced.attrs["is_static_backup"] = True
     return sliced
+
+
+def append_latest_completed_market_bar(
+    history: pd.DataFrame,
+    quote: dict[str, object],
+    end: date,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """Append one completed quote bar only when its price basis is continuous.
+
+    The bundled backup is qfq, while quote endpoints are unadjusted. Their latest
+    prices are compatible only when the quote's previous close equals the backup's
+    final close. The one-business-day rule prevents silently skipping missing bars.
+    """
+    result = history.copy()
+    result.attrs = dict(history.attrs)
+
+    def reject(reason: str) -> pd.DataFrame:
+        result.attrs["latest_quote_warning"] = reason
+        return result
+
+    if history.empty:
+        return reject("历史数据为空，无法校验最新收盘")
+    quote_time = pd.to_datetime(quote.get("quote_time"), errors="coerce")
+    if pd.isna(quote_time):
+        return reject("最新行情缺少有效时间")
+    quote_day = quote_time.date()
+    latest_day = pd.to_datetime(history["date"], errors="coerce").max().date()
+    if quote_day <= latest_day or quote_day > end:
+        return result
+
+    current = now or datetime.now()
+    if quote_day >= current.date() and current.time() < time(15, 5):
+        return result
+    if _business_days_between(latest_day, quote_day) != 1:
+        return reject(f"备份截止 {latest_day.isoformat()}，无法确认中间交易日是否完整")
+
+    try:
+        previous_close = float(quote["previous_close"])
+        last_close = float(history["close"].iloc[-1])
+        bar = {
+            "date": pd.Timestamp(quote_day),
+            "open": float(quote["open"]),
+            "high": float(quote["high"]),
+            "low": float(quote["low"]),
+            "close": float(quote["price"]),
+            "volume": float(quote["volume"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        return reject("最新行情缺少完整 OHLCV 字段")
+
+    tolerance = max(0.02, abs(previous_close) * 0.001)
+    if abs(previous_close - last_close) > tolerance:
+        return reject(
+            f"价格口径不连续：行情昨收 {previous_close:.2f}，备份末值 {last_close:.2f}"
+        )
+
+    merged = pd.concat([history, pd.DataFrame([bar])], ignore_index=True)
+    attrs = dict(history.attrs)
+    try:
+        merged = validate_ohlcv_frame(merged, str(quote.get("symbol") or "股票"))
+    except ValueError as exc:
+        return reject(f"最新行情校验失败：{exc}")
+    source_name = str(attrs.get("source_name") or "静态备份")
+    quote_source = str(quote.get("source_name") or "最新行情")
+    attrs.update(
+        {
+            "source_name": f"{source_name} + {quote_source}最新收盘",
+            "latest_bar_from_quote": True,
+            "latest_bar_date": quote_day.isoformat(),
+        }
+    )
+    merged.attrs = attrs
+    return merged
 
 
 def eastmoney_secid(symbol: str) -> str:
@@ -744,7 +849,15 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
                 return with_data_source(cached, "本地历史缓存")
             if adjust == "qfq":
                 try:
-                    return load_cloud_seed_daily(symbol, start, end)
+                    backup = load_cloud_seed_daily(symbol, start, end)
+                    if is_recent_market_request(end):
+                        try:
+                            quote = fetch_latest_market_quote(symbol)
+                        except Exception as exc:
+                            backup.attrs["latest_quote_warning"] = str(exc)
+                        else:
+                            backup = append_latest_completed_market_bar(backup, quote, end)
+                    return backup
                 except Exception:
                     pass
             raise RuntimeError("在线数据源暂时不可用，且本地没有该股票缓存；请稍后重试或勾选离线演示数据。")
