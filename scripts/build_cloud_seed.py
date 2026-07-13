@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import time
 from datetime import date, timedelta
@@ -42,6 +43,12 @@ def build_watchlist_histories() -> dict[str, object]:
         else:
             raise RuntimeError(f"{symbol} baostock 前复权下载失败") from last_error
         latest_close = float(history["close"].iloc[-1])
+        latest_date = history["date"].max().date()
+        quote_time = quote.get("quote_time")
+        if quote_time is None or quote_time.date() != latest_date:
+            raise RuntimeError(
+                f"{symbol} baostock 末日 {latest_date.isoformat()} 与腾讯行情日期不一致"
+            )
         if abs(latest_close - price) > 0.011:
             raise RuntimeError(
                 f"{symbol} 前复权末日收盘 {latest_close:.4f} 与腾讯最新价 {price:.4f} 不一致"
@@ -93,9 +100,23 @@ def build_market_snapshot() -> dict[str, object]:
     return metadata
 
 
-if __name__ == "__main__":
-    if not SEQUOIA_DB_PATH.exists():
-        raise FileNotFoundError(f"Sequoia-X database not found: {SEQUOIA_DB_PATH}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build verified cloud market-data backups")
+    parser.add_argument(
+        "--histories-only",
+        action="store_true",
+        help="Update watchlist histories without requiring the local Sequoia-X database",
+    )
+    args = parser.parse_args()
     histories = build_watchlist_histories()
-    market = build_market_snapshot()
+    if args.histories_only:
+        market: dict[str, object] = {"skipped": True}
+    else:
+        if not SEQUOIA_DB_PATH.exists():
+            raise FileNotFoundError(f"Sequoia-X database not found: {SEQUOIA_DB_PATH}")
+        market = build_market_snapshot()
     print({"watchlist": histories, "market": market})
+
+
+if __name__ == "__main__":
+    main()
