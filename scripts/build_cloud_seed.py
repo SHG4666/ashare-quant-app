@@ -13,7 +13,6 @@ from ashare_quant.data import (
     fetch_baostock_daily,
     fetch_tencent_stock_quotes,
 )
-from ashare_quant.market_scan import scan_local_market_candidates
 from ashare_quant.watchlist import load_watchlist
 
 
@@ -77,6 +76,8 @@ def build_watchlist_histories() -> dict[str, object]:
 
 
 def build_market_snapshot() -> dict[str, object]:
+    from ashare_quant.market_scan import scan_local_market_candidates
+
     candidates = scan_local_market_candidates(
         SEQUOIA_DB_PATH,
         top_n=500,
