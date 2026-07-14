@@ -188,6 +188,19 @@ CHART_THEME = {
     "line": UI_THEME["line"],
     "navigator": UI_THEME["surface-muted"],
 }
+MA_LINE_STYLES = (
+    {
+        5: {"color": "#ffc857", "width": 1.7},
+        10: {"color": "#55aaff", "width": 2.1},
+        20: {"color": "#ff74b8", "width": 2.1, "dash": "dash"},
+    }
+    if dark_mode
+    else {
+        5: {"color": "#a96000", "width": 1.7},
+        10: {"color": "#0969da", "width": 2.1},
+        20: {"color": "#c12b78", "width": 2.1, "dash": "dash"},
+    }
+)
 st.markdown(
     """
     <style>
@@ -529,7 +542,7 @@ def keep_stock_pool_tab_active() -> None:
     st.session_state["default_tab_once"] = "股票池与计划"
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def load_data_cached(symbol: str, start: date, end: date, adjust: str, use_demo: bool) -> pd.DataFrame:
     if use_demo:
         demo = make_demo_data()
@@ -667,7 +680,6 @@ def run_stock_pool_scan_for_symbols(symbols: list[str], progress_callback=None) 
 
 
 def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str = "日K") -> go.Figure:
-    ma_colors = {5: "#d99100", 10: "#2468d8", 20: "#9b51c7"}
     chart_data = aggregate_price_bars(result, period)
     dates = pd.to_datetime(chart_data["date"])
     closes = pd.to_numeric(chart_data["close"], errors="coerce")
@@ -716,7 +728,7 @@ def build_price_figure(result: pd.DataFrame, trades: pd.DataFrame, period: str =
                 y=moving_average,
                 mode="lines",
                 name=f"MA{window}",
-                line={"color": ma_colors[window], "width": 1.45},
+                line=MA_LINE_STYLES[window],
                 hovertemplate=f"MA{window} %{{y:.2f}}<extra></extra>",
             ),
             row=1,
@@ -1021,13 +1033,11 @@ data_status = summarize_price_data_status(
 
 quote: dict[str, object] | None = None
 quote_error = ""
-if not use_demo and is_mainland_market_session():
+if not use_demo:
     try:
         quote = load_quote_cached(symbol)
     except Exception as exc:
         quote_error = str(exc)
-elif not use_demo:
-    quote_error = "当前为非交易时段"
 
 watchlist_name = next((item.name for item in watchlist_entries if item.symbol == symbol and item.name), "")
 stock_name = str(quote.get("name", "")) if quote else ""
@@ -1056,16 +1066,21 @@ else:
 latest = result.iloc[-1]
 signal_label = "持有 / 关注" if int(latest.get("signal", 0)) == 1 else "空仓 / 等待"
 signal_action = str(latest.get("action", "")) or "无新动作"
+market_is_open = is_mainland_market_session()
+price_label = "盘中价格" if quote and market_is_open else "最新收盘" if quote else "最新历史收盘"
 metric_cols = st.columns(5)
-metric_cols[0].metric("实时价格" if quote else "最新历史收盘", f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%", delta_color="inverse")
+metric_cols[0].metric(price_label, f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%", delta_color="inverse")
 metric_cols[1].metric(f"当前信号 · {signal_action}", signal_label)
 metric_cols[2].metric("策略总收益", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
 metric_cols[3].metric("最大回撤", f"{summary['max_drawdown_pct']:.2f}%")
 metric_cols[4].metric(f"夏普比率 · {summary['trade_count']}次交易", f"{summary['sharpe']:.2f}")
 is_static_backup = bool(data.attrs.get("is_static_backup", False))
+latest_bar_from_quote = bool(data.attrs.get("latest_bar_from_quote", False))
 price_verified = bool(data.attrs.get("price_verified", not use_demo))
 if data_status["is_stale"]:
     status_label = "数据可能滞后"
+elif latest_bar_from_quote:
+    status_label = "最新收盘已校验"
 elif is_static_backup:
     status_label = "静态备份 · 非实时"
 elif not price_verified:
@@ -1073,7 +1088,7 @@ elif not price_verified:
 else:
     status_label = "数据已校验"
 status_tone = "stale" if data_status["is_stale"] or not price_verified else ""
-quote_mode = "实时行情" if quote else "历史收盘"
+quote_mode = "盘中行情" if quote and market_is_open else "最新收盘" if quote else "历史收盘"
 quote_detail = (
     f'{quote.get("price_basis")} · {quote.get("source_name")} · {quote_time_label}'
     if quote
@@ -1089,8 +1104,13 @@ st.markdown(
 )
 if data_status["is_stale"]:
     st.warning(f"历史行情距请求结束日约 {data_status['staleness_days']} 个工作日，请先确认数据源是否已经收盘更新。")
+elif latest_bar_from_quote:
+    st.info("历史区间来自 baostock 前复权备份；最新一根 K 线已通过昨收连续性与 OHLC 校验后补入。")
 elif is_static_backup:
     st.warning("在线历史行情源暂时不可用，当前展示随应用发布的 baostock 前复权静态备份；请以标注的截止日期为准。")
+latest_quote_warning = str(data.attrs.get("latest_quote_warning", "")).strip()
+if latest_quote_warning:
+    st.warning(f"最新收盘未拼入 K 线：{latest_quote_warning}")
 
 
 watchlist_save_toast = st.session_state.pop("watchlist_save_toast", "")
