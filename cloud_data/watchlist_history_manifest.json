@@ -1,199 +1,199 @@
 {
   "source": "baostock",
   "adjust": "qfq",
-  "generated_on": "2026-08-11",
+  "generated_on": "2026-08-12",
   "symbols": {
     "600522": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 32.34
+      "latest_date": "2026-08-12",
+      "latest_close": 33.55
     },
     "002747": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 36.12
+      "latest_date": "2026-08-12",
+      "latest_close": 34.71
     },
     "300966": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 26.69
+      "latest_date": "2026-08-12",
+      "latest_close": 27.18
     },
     "603893": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 213.36
+      "latest_date": "2026-08-12",
+      "latest_close": 213.5
     },
     "300861": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 17.3
+      "latest_date": "2026-08-12",
+      "latest_close": 17.54
     },
     "000810": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 9.65
+      "latest_date": "2026-08-12",
+      "latest_close": 9.78
     },
     "603068": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 40.53
+      "latest_date": "2026-08-12",
+      "latest_close": 40.85
     },
     "600360": {
-      "rows": 713,
+      "rows": 714,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 10.54
+      "latest_date": "2026-08-12",
+      "latest_close": 10.61
     },
     "603127": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 51.2
+      "latest_date": "2026-08-12",
+      "latest_close": 51.15
     },
     "688114": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 65.0
+      "latest_date": "2026-08-12",
+      "latest_close": 63.92
     },
     "000063": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 34.19
+      "latest_date": "2026-08-12",
+      "latest_close": 35.59
     },
     "603669": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 6.18
+      "latest_date": "2026-08-12",
+      "latest_close": 6.2
     },
     "603339": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 13.83
+      "latest_date": "2026-08-12",
+      "latest_close": 14.06
     },
     "600228": {
-      "rows": 718,
+      "rows": 719,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 8.24
+      "latest_date": "2026-08-12",
+      "latest_close": 8.33
     },
     "002077": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 12.61
+      "latest_date": "2026-08-12",
+      "latest_close": 12.92
     },
     "002049": {
-      "rows": 715,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 67.3
-    },
-    "688131": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 95.0
-    },
-    "300019": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 14.83
-    },
-    "688387": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 13.51
-    },
-    "301092": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 45.81
-    },
-    "002745": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 11.13
-    },
-    "001287": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 23.11
-    },
-    "002457": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 11.16
-    },
-    "600345": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 46.18
-    },
-    "002815": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 12.87
-    },
-    "300458": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 34.74
-    },
-    "300759": {
-      "rows": 725,
-      "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 47.59
-    },
-    "603991": {
       "rows": 716,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 131.42
+      "latest_date": "2026-08-12",
+      "latest_close": 67.28
+    },
+    "688131": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 94.1
+    },
+    "300019": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 15.03
+    },
+    "688387": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 13.91
+    },
+    "301092": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 46.49
+    },
+    "002745": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 11.66
+    },
+    "001287": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 23.22
+    },
+    "002457": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 11.13
+    },
+    "600345": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 47.22
+    },
+    "002815": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 13.08
+    },
+    "300458": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 35.1
+    },
+    "300759": {
+      "rows": 726,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 47.9
+    },
+    "603991": {
+      "rows": 717,
+      "first_date": "2023-08-14",
+      "latest_date": "2026-08-12",
+      "latest_close": 132.96
     },
     "002174": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 11.79
+      "latest_date": "2026-08-12",
+      "latest_close": 12.16
     },
     "003033": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 65.0
+      "latest_date": "2026-08-12",
+      "latest_close": 66.68
     },
     "300199": {
-      "rows": 725,
+      "rows": 726,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 25.89
+      "latest_date": "2026-08-12",
+      "latest_close": 25.91
     },
     "003013": {
-      "rows": 715,
+      "rows": 716,
       "first_date": "2023-08-14",
-      "latest_date": "2026-08-11",
-      "latest_close": 17.47
+      "latest_date": "2026-08-12",
+      "latest_close": 18.39
     }
   }
 }
