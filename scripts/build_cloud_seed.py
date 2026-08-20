@@ -16,6 +16,16 @@ from ashare_quant.data import (
 from ashare_quant.watchlist import load_watchlist
 
 
+def _load_previous_manifest() -> dict[str, object]:
+    path = CLOUD_DATA_DIR / "watchlist_history_manifest.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def build_watchlist_histories() -> dict[str, object]:
     symbols = load_watchlist()
     quotes = fetch_tencent_stock_quotes(symbols)
@@ -23,56 +33,99 @@ def build_watchlist_histories() -> dict[str, object]:
     start = date.today() - timedelta(days=365 * 3)
     end = date.today()
     row_count = 0
+    updated_count = 0
+    failures: dict[str, str] = {}
+    previous_manifest = _load_previous_manifest()
+    previous_symbols = previous_manifest.get("symbols", {})
+    if not isinstance(previous_symbols, dict):
+        previous_symbols = {}
     manifest_symbols: dict[str, dict[str, object]] = {}
 
     for symbol in symbols:
-        quote = quotes.get(symbol, {})
-        price = float(quote.get("price") or 0)
-        if price <= 0:
-            raise RuntimeError(f"无法获取 {symbol} 的正常市场价格")
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                history = fetch_baostock_daily(symbol, start, end, "qfq")
-                break
-            except Exception as exc:
-                last_error = exc
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-        else:
-            raise RuntimeError(f"{symbol} baostock 前复权下载失败") from last_error
-        latest_close = float(history["close"].iloc[-1])
-        latest_date = history["date"].max().date()
-        quote_time = quote.get("quote_time")
-        if quote_time is None or quote_time.date() != latest_date:
-            raise RuntimeError(
-                f"{symbol} baostock 末日 {latest_date.isoformat()} 与腾讯行情日期不一致"
-            )
-        if abs(latest_close - price) > 0.011:
-            raise RuntimeError(
-                f"{symbol} 前复权末日收盘 {latest_close:.4f} 与腾讯最新价 {price:.4f} 不一致"
-            )
-        history.to_csv(CLOUD_HISTORY_DIR / f"{symbol}.csv", index=False)
-        row_count += len(history)
-        manifest_symbols[symbol] = {
-            "rows": len(history),
-            "first_date": history["date"].min().date().isoformat(),
-            "latest_date": history["date"].max().date().isoformat(),
-            "latest_close": latest_close,
-        }
+        try:
+            quote = quotes.get(symbol, {})
+            price = float(quote.get("price") or 0)
+            if price <= 0:
+                raise RuntimeError(f"无法获取 {symbol} 的正常市场价格")
+
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    history = fetch_baostock_daily(symbol, start, end, "qfq")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(2 * (attempt + 1))
+            else:
+                raise RuntimeError(f"{symbol} baostock 前复权下载失败") from last_error
+
+            if history.empty:
+                raise RuntimeError(f"{symbol} baostock 返回空行情")
+
+            latest_close = float(history["close"].iloc[-1])
+            latest_date = history["date"].max().date()
+            quote_time = quote.get("quote_time")
+
+            # Tencent quotes can advance before baostock has published the same
+            # trading day's adjusted history. Treat that as a temporary source
+            # lag instead of failing the entire watchlist refresh.
+            if quote_time is None:
+                raise RuntimeError(f"{symbol} 腾讯行情缺少时间")
+            if quote_time.date() < latest_date:
+                raise RuntimeError(
+                    f"{symbol} 腾讯行情日期 {quote_time.date().isoformat()} 早于 baostock {latest_date.isoformat()}"
+                )
+            if quote_time.date() == latest_date and abs(latest_close - price) > 0.011:
+                raise RuntimeError(
+                    f"{symbol} 前复权末日收盘 {latest_close:.4f} 与腾讯最新价 {price:.4f} 不一致"
+                )
+
+            history.to_csv(CLOUD_HISTORY_DIR / f"{symbol}.csv", index=False)
+            row_count += len(history)
+            updated_count += 1
+            manifest_symbols[symbol] = {
+                "rows": len(history),
+                "first_date": history["date"].min().date().isoformat(),
+                "latest_date": latest_date.isoformat(),
+                "latest_close": latest_close,
+            }
+        except Exception as exc:
+            failures[symbol] = str(exc)
+            previous = previous_symbols.get(symbol)
+            if isinstance(previous, dict):
+                manifest_symbols[symbol] = previous
+            print(f"WARNING: keeping previous cloud history for {symbol}: {exc}")
+
+    if updated_count == 0:
+        raise RuntimeError(
+            "所有自选股云端历史更新均失败；为避免提交无效数据，本次任务终止。"
+            + (f" failures={failures}" if failures else "")
+        )
 
     manifest = {
         "source": "baostock",
         "adjust": "qfq",
         "generated_on": date.today().isoformat(),
         "symbols": manifest_symbols,
+        "refresh": {
+            "requested_symbols": len(symbols),
+            "updated_symbols": updated_count,
+            "failed_symbols": len(failures),
+            "failures": failures,
+        },
     }
     (CLOUD_DATA_DIR / "watchlist_history_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
-    return {"symbol_count": len(symbols), "row_count": row_count}
+    return {
+        "symbol_count": len(symbols),
+        "updated_count": updated_count,
+        "failed_count": len(failures),
+        "row_count": row_count,
+    }
 
 
 def build_market_snapshot() -> dict[str, object]:
