@@ -206,12 +206,22 @@ def _business_days_between(start: date, end: date) -> int:
     return len(pd.bdate_range(start=pd.Timestamp(start) + pd.Timedelta(days=1), end=pd.Timestamp(end)))
 
 
-def expected_latest_business_day(end: date, now: datetime | None = None) -> date:
-    """Estimate the latest completed trading day without treating weekends as stale."""
+def expected_latest_business_day(
+    end: date,
+    now: datetime | None = None,
+    *,
+    data_ready_time: time = time(15, 5),
+) -> date:
+    """Estimate the latest available trading day without treating weekends as stale.
+
+    ``data_ready_time`` lets delayed daily-bar providers keep using the previous
+    session until their normal publication window, while live sources retain the
+    market-close default.
+    """
     current = china_market_now(now)
-    expected = end
-    if end >= current.date() and current.weekday() < 5 and current.time() < time(15, 5):
-        expected = current.date() - timedelta(days=1)
+    expected = min(end, current.date())
+    if expected == current.date() and current.weekday() < 5 and current.time() < data_ready_time:
+        expected -= timedelta(days=1)
     while expected.weekday() >= 5:
         expected -= timedelta(days=1)
     return expected
