@@ -45,7 +45,9 @@ def test_app_uses_china_market_colors_for_metric_deltas():
     assert 'stMetricDeltaIcon-Down' in source
     assert 'delta_color="inverse"' in source
     assert 'f"{summary[\'excess_return_pct\']:+.2f}% 超额"' in source
-    assert '策略信号 · 截至{strategy_day_short}' in source
+    assert '策略状态 · 截至{strategy_day_short}' in source
+    assert "summarize_latest_strategy_state" in source
+    assert "最近动作" in source
 
 
 def test_app_separates_quote_date_from_strategy_data_date():

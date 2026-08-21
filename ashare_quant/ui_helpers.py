@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+import pandas as pd
+
 
 _SYMBOL_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
 
@@ -107,6 +109,72 @@ def indicator_display_columns(strategy_name: str) -> list[str]:
         *_STRATEGY_INDICATOR_COLUMNS[strategy_name],
         *_RECENT_SIGNAL_BASE_COLUMNS[2:],
     ]
+
+
+def summarize_latest_strategy_state(result: pd.DataFrame) -> dict[str, str | bool]:
+    """Describe executable strategy state separately from the raw model signal."""
+    if result.empty:
+        raise ValueError("strategy result is empty")
+
+    latest = result.iloc[-1]
+    signal = int(latest.get("signal", 0))
+    position = float(latest.get("position", 0) or 0)
+    action = str(latest.get("action", "") or "").strip().upper()
+    risk_exit = str(latest.get("risk_exit", "") or "").strip().upper()
+    blocked_value = latest.get("risk_blocked", False)
+    risk_blocked = bool(blocked_value) if pd.notna(blocked_value) else False
+
+    condition_label = "多头条件" if signal == 1 else "空仓条件"
+    if action == "SELL" and risk_exit == "STOP_LOSS":
+        state_label = "卖出 / 止损"
+    elif action == "SELL" and risk_exit == "TAKE_PROFIT":
+        state_label = "卖出 / 止盈"
+    elif action == "SELL":
+        state_label = "卖出 / 空仓"
+    elif action == "BUY":
+        state_label = "买入 / 持有"
+    elif risk_blocked:
+        state_label = "空仓 / 风险锁定"
+    elif position > 0:
+        state_label = "持有 / 在仓"
+    elif signal == 1:
+        state_label = "空仓 / 等待买入"
+    else:
+        state_label = "空仓 / 等待"
+
+    latest_action_label = "暂无交易动作"
+    if "action" in result.columns:
+        action_rows = result.loc[result["action"].fillna("").astype(str).str.strip().ne("")]
+        if not action_rows.empty:
+            action_row = action_rows.iloc[-1]
+            last_action = str(action_row.get("action", "") or "").strip().upper()
+            last_risk_exit = str(action_row.get("risk_exit", "") or "").strip().upper()
+            if last_action == "BUY":
+                action_text = "买入"
+            elif last_action == "SELL" and last_risk_exit == "STOP_LOSS":
+                action_text = "止损卖出"
+            elif last_action == "SELL" and last_risk_exit == "TAKE_PROFIT":
+                action_text = "止盈卖出"
+            else:
+                action_text = "卖出" if last_action == "SELL" else last_action
+            action_date = pd.to_datetime(action_row.get("date"), errors="coerce")
+            date_label = action_date.strftime("%m-%d") if not pd.isna(action_date) else "最近"
+            latest_action_label = f"{date_label} {action_text}"
+
+    explanation = "执行状态由实际仓位、交易动作和风控结果共同决定。"
+    if risk_blocked:
+        explanation = (
+            "模型仍给出多头条件，但风控止损后已锁定重新入场；"
+            "需等待模型信号先归零再重新触发。"
+        )
+
+    return {
+        "state_label": state_label,
+        "condition_label": condition_label,
+        "latest_action_label": latest_action_label,
+        "risk_blocked": risk_blocked,
+        "explanation": explanation,
+    }
 
 
 def strategy_report_slug(strategy_name: str) -> str:
