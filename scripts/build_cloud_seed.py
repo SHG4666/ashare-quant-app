@@ -4,13 +4,14 @@ import argparse
 import json
 import time
 from datetime import date, timedelta
-from pathlib import Path
 
 from ashare_quant.data import (
     CLOUD_DATA_DIR,
     CLOUD_HISTORY_DIR,
     SEQUOIA_DB_PATH,
+    expected_latest_business_day,
     fetch_baostock_daily,
+    fetch_eastmoney_daily_with_curl,
     fetch_tencent_stock_quotes,
 )
 from ashare_quant.watchlist import load_watchlist
@@ -26,6 +27,35 @@ def _load_previous_manifest() -> dict[str, object]:
         return {}
 
 
+def _fetch_fresh_history(symbol: str, start: date, end: date):
+    expected_date = expected_latest_business_day(end)
+    source_errors: list[str] = []
+
+    for source_name, fetcher in (
+        ("baostock", lambda: fetch_baostock_daily(symbol, start, end, "qfq")),
+        ("eastmoney", lambda: fetch_eastmoney_daily_with_curl(symbol, start, end, "qfq")),
+    ):
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                history = fetcher()
+                if history.empty:
+                    raise RuntimeError("返回空行情")
+                latest_date = history["date"].max().date()
+                if latest_date < expected_date:
+                    raise RuntimeError(
+                        f"最新交易日 {latest_date.isoformat()}，预期至少 {expected_date.isoformat()}"
+                    )
+                return history, source_name
+            except Exception as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+        source_errors.append(f"{source_name}: {last_error}")
+
+    raise RuntimeError("；".join(source_errors))
+
+
 def build_watchlist_histories() -> dict[str, object]:
     symbols = load_watchlist()
     quotes = fetch_tencent_stock_quotes(symbols)
@@ -35,6 +65,7 @@ def build_watchlist_histories() -> dict[str, object]:
     row_count = 0
     updated_count = 0
     failures: dict[str, str] = {}
+    source_counts: dict[str, int] = {}
     previous_manifest = _load_previous_manifest()
     previous_symbols = previous_manifest.get("symbols", {})
     if not isinstance(previous_symbols, dict):
@@ -48,33 +79,16 @@ def build_watchlist_histories() -> dict[str, object]:
             if price <= 0:
                 raise RuntimeError(f"无法获取 {symbol} 的正常市场价格")
 
-            last_error: Exception | None = None
-            for attempt in range(3):
-                try:
-                    history = fetch_baostock_daily(symbol, start, end, "qfq")
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    if attempt < 2:
-                        time.sleep(2 * (attempt + 1))
-            else:
-                raise RuntimeError(f"{symbol} baostock 前复权下载失败") from last_error
-
-            if history.empty:
-                raise RuntimeError(f"{symbol} baostock 返回空行情")
-
+            history, source_name = _fetch_fresh_history(symbol, start, end)
             latest_close = float(history["close"].iloc[-1])
             latest_date = history["date"].max().date()
             quote_time = quote.get("quote_time")
 
-            # Tencent quotes can advance before baostock has published the same
-            # trading day's adjusted history. Treat that as a temporary source
-            # lag instead of failing the entire watchlist refresh.
             if quote_time is None:
                 raise RuntimeError(f"{symbol} 腾讯行情缺少时间")
             if quote_time.date() < latest_date:
                 raise RuntimeError(
-                    f"{symbol} 腾讯行情日期 {quote_time.date().isoformat()} 早于 baostock {latest_date.isoformat()}"
+                    f"{symbol} 腾讯行情日期 {quote_time.date().isoformat()} 早于历史行情 {latest_date.isoformat()}"
                 )
             if quote_time.date() == latest_date and abs(latest_close - price) > 0.011:
                 raise RuntimeError(
@@ -84,11 +98,13 @@ def build_watchlist_histories() -> dict[str, object]:
             history.to_csv(CLOUD_HISTORY_DIR / f"{symbol}.csv", index=False)
             row_count += len(history)
             updated_count += 1
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
             manifest_symbols[symbol] = {
                 "rows": len(history),
                 "first_date": history["date"].min().date().isoformat(),
                 "latest_date": latest_date.isoformat(),
                 "latest_close": latest_close,
+                "source": source_name,
             }
         except Exception as exc:
             failures[symbol] = str(exc)
@@ -104,14 +120,16 @@ def build_watchlist_histories() -> dict[str, object]:
         )
 
     manifest = {
-        "source": "baostock",
+        "source": "baostock/eastmoney",
         "adjust": "qfq",
         "generated_on": date.today().isoformat(),
+        "expected_latest_date": expected_latest_business_day(end).isoformat(),
         "symbols": manifest_symbols,
         "refresh": {
             "requested_symbols": len(symbols),
             "updated_symbols": updated_count,
             "failed_symbols": len(failures),
+            "source_counts": source_counts,
             "failures": failures,
         },
     }
@@ -125,6 +143,7 @@ def build_watchlist_histories() -> dict[str, object]:
         "updated_count": updated_count,
         "failed_count": len(failures),
         "row_count": row_count,
+        "source_counts": source_counts,
     }
 
 
