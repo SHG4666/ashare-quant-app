@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pandas as pd
 
@@ -26,6 +26,19 @@ def test_expected_latest_business_day_uses_friday_for_weekend_and_preopen_monday
     assert data.expected_latest_business_day(
         date(2026, 7, 13), now=datetime(2026, 7, 13, 8, 30)
     ) == date(2026, 7, 10)
+
+
+def test_expected_latest_business_day_can_wait_for_provider_publication():
+    assert data.expected_latest_business_day(
+        date(2026, 8, 21),
+        now=datetime(2026, 8, 21, 15, 23),
+        data_ready_time=time(18, 0),
+    ) == date(2026, 8, 20)
+    assert data.expected_latest_business_day(
+        date(2026, 8, 21),
+        now=datetime(2026, 8, 21, 18, 30),
+        data_ready_time=time(18, 0),
+    ) == date(2026, 8, 21)
 
 
 def test_price_history_freshness_accepts_friday_close_for_saturday_request():

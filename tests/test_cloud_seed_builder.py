@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -42,6 +42,20 @@ def test_verified_history_falls_back_when_baostock_is_stale(monkeypatch):
 
     assert history["date"].max() == pd.Timestamp("2026-08-19")
     assert source_name == "东方财富K线"
+
+
+def test_verified_history_accepts_prior_session_before_provider_ready():
+    history = make_history("2026-08-20", 10.5)
+    quote = {"quote_time": pd.Timestamp("2026-08-21 15:23"), "price": 11.0}
+
+    checked = build_cloud_seed._validate_history_against_quote(
+        "000001",
+        history,
+        quote,
+        expected_date=date(2026, 8, 20),
+    )
+
+    assert checked["date"].max() == pd.Timestamp("2026-08-20")
 
 
 def test_cloud_seed_updates_symbols_independently_and_preserves_failed_file(monkeypatch, tmp_path):
@@ -89,3 +103,12 @@ def test_market_update_workflow_runs_after_close_with_a_retry():
 
     assert 'cron: "30 10,12 * * 1-5"' in source
     assert "timeout-minutes: 30" in source
+
+
+def test_cloud_builder_uses_delayed_provider_publication_cutoff():
+    assert build_cloud_seed._expected_cloud_history_date(
+        date(2026, 8, 21), now=datetime(2026, 8, 21, 15, 23)
+    ) == date(2026, 8, 20)
+    assert build_cloud_seed._expected_cloud_history_date(
+        date(2026, 8, 21), now=datetime(2026, 8, 21, 18, 30)
+    ) == date(2026, 8, 21)

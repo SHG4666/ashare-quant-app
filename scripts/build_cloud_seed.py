@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, time as clock_time, timedelta
 
 import pandas as pd
 
@@ -20,6 +20,17 @@ from ashare_quant.data import (
     validate_ohlcv_frame,
 )
 from ashare_quant.watchlist import load_watchlist
+
+CLOUD_HISTORY_READY_TIME = clock_time(18, 0)
+
+
+def _expected_cloud_history_date(end: date, now: datetime | None = None) -> date:
+    """Return the session a delayed end-of-day provider should have published."""
+    return expected_latest_business_day(
+        end,
+        now=now,
+        data_ready_time=CLOUD_HISTORY_READY_TIME,
+    )
 
 
 def _load_previous_manifest() -> dict[str, object]:
@@ -91,7 +102,7 @@ def _fetch_verified_history(
     quote: dict[str, object],
 ) -> tuple[pd.DataFrame, str]:
     """Fetch a verified qfq series, falling back when one provider is stale."""
-    expected_date = expected_latest_business_day(end)
+    expected_date = _expected_cloud_history_date(end)
     provider_errors: list[str] = []
     providers = (
         ("baostock", fetch_baostock_daily, 3),
@@ -173,7 +184,7 @@ def build_watchlist_histories(run_date: date | None = None) -> dict[str, object]
     today = run_date or china_market_today()
     start = today - timedelta(days=365 * 3)
     end = today
-    expected_date = expected_latest_business_day(end)
+    expected_date = _expected_cloud_history_date(end)
     previous_manifest = _load_previous_manifest()
     previous_symbols = previous_manifest.get("symbols", {})
     if not isinstance(previous_symbols, dict):
