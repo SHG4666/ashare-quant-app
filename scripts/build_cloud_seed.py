@@ -5,14 +5,19 @@ import json
 import time
 from datetime import date, timedelta
 
+import pandas as pd
+
 from ashare_quant.data import (
     CLOUD_DATA_DIR,
     CLOUD_HISTORY_DIR,
     SEQUOIA_DB_PATH,
+    china_market_today,
     expected_latest_business_day,
     fetch_baostock_daily,
     fetch_eastmoney_daily_with_curl,
+    fetch_latest_market_quote,
     fetch_tencent_stock_quotes,
+    validate_ohlcv_frame,
 )
 from ashare_quant.watchlist import load_watchlist
 
@@ -27,107 +32,222 @@ def _load_previous_manifest() -> dict[str, object]:
         return {}
 
 
-def _fetch_fresh_history(symbol: str, start: date, end: date):
+def _quote_is_complete(quote: object) -> bool:
+    if not isinstance(quote, dict):
+        return False
+    try:
+        price = float(quote.get("price") or 0)
+        quote_time = pd.to_datetime(quote.get("quote_time"), errors="coerce")
+    except (TypeError, ValueError):
+        return False
+    return price > 0 and not pd.isna(quote_time)
+
+
+def _validate_history_against_quote(
+    symbol: str,
+    history: pd.DataFrame,
+    quote: dict[str, object],
+    expected_date: date,
+) -> pd.DataFrame:
+    """Return normalized history only when it reaches the latest completed session."""
+    checked = validate_ohlcv_frame(history, symbol)
+    latest_date = checked["date"].max().date()
+    if latest_date < expected_date:
+        raise RuntimeError(
+            f"{symbol} 历史最新交易日 {latest_date.isoformat()}，"
+            f"预期至少到 {expected_date.isoformat()}"
+        )
+
+    quote_time = pd.to_datetime(quote.get("quote_time"), errors="coerce")
+    price = float(quote.get("price") or 0)
+    if pd.isna(quote_time) or price <= 0:
+        raise RuntimeError(f"无法获取 {symbol} 的完整正常市场行情")
+
+    quote_date = quote_time.date()
+    if quote_date < latest_date:
+        raise RuntimeError(
+            f"{symbol} 实时行情日期 {quote_date.isoformat()} "
+            f"早于历史行情 {latest_date.isoformat()}"
+        )
+
+    # The latest qfq close should agree with the close quote when both are for
+    # the same completed day. If the quote is intraday for a newer day, the
+    # completed-session freshness check above is the applicable guard instead.
+    if quote_date == latest_date:
+        latest_close = float(checked["close"].iloc[-1])
+        tolerance = max(0.02, abs(price) * 0.001)
+        if abs(latest_close - price) > tolerance:
+            raise RuntimeError(
+                f"{symbol} 前复权末日收盘 {latest_close:.4f} "
+                f"与最新价 {price:.4f} 不一致"
+            )
+    return checked
+
+
+def _fetch_verified_history(
+    symbol: str,
+    start: date,
+    end: date,
+    quote: dict[str, object],
+) -> tuple[pd.DataFrame, str]:
+    """Fetch a verified qfq series, falling back when one provider is stale."""
     expected_date = expected_latest_business_day(end)
-    source_errors: list[str] = []
-
-    for source_name, fetcher in (
-        ("baostock", lambda: fetch_baostock_daily(symbol, start, end, "qfq")),
-        ("eastmoney", lambda: fetch_eastmoney_daily_with_curl(symbol, start, end, "qfq")),
-    ):
-        last_error: Exception | None = None
-        for attempt in range(3):
+    provider_errors: list[str] = []
+    providers = (
+        ("baostock", fetch_baostock_daily, 3),
+        ("东方财富K线", fetch_eastmoney_daily_with_curl, 2),
+    )
+    for source_name, fetcher, attempts in providers:
+        history: pd.DataFrame | None = None
+        for attempt in range(attempts):
             try:
-                history = fetcher()
-                if history.empty:
-                    raise RuntimeError("返回空行情")
-                latest_date = history["date"].max().date()
-                if latest_date < expected_date:
-                    raise RuntimeError(
-                        f"最新交易日 {latest_date.isoformat()}，预期至少 {expected_date.isoformat()}"
-                    )
-                return history, source_name
+                history = fetcher(symbol, start, end, "qfq")
+                break
             except Exception as exc:
-                last_error = exc
-                if attempt < 2:
+                provider_errors.append(f"{source_name}: {exc}")
+                if attempt < attempts - 1:
                     time.sleep(2 * (attempt + 1))
-        source_errors.append(f"{source_name}: {last_error}")
+        if history is None:
+            continue
+        try:
+            return (
+                _validate_history_against_quote(
+                    symbol,
+                    history,
+                    quote,
+                    expected_date,
+                ),
+                source_name,
+            )
+        except Exception as exc:
+            # A stale provider will not become current after an immediate retry;
+            # move to the next independent daily-K-line source instead.
+            provider_errors.append(f"{source_name}: {exc}")
 
-    raise RuntimeError("；".join(source_errors))
+    detail = "；".join(provider_errors[-5:]) or "没有可用数据源"
+    raise RuntimeError(f"{symbol} 前复权历史更新失败：{detail}")
 
 
-def build_watchlist_histories() -> dict[str, object]:
+def _history_metadata(
+    symbol: str,
+    history: pd.DataFrame,
+    *,
+    source_name: str,
+    status: str,
+    error: str = "",
+) -> dict[str, object]:
+    checked = validate_ohlcv_frame(history, symbol)
+    metadata: dict[str, object] = {
+        "rows": len(checked),
+        "first_date": checked["date"].min().date().isoformat(),
+        "latest_date": checked["date"].max().date().isoformat(),
+        "latest_close": float(checked["close"].iloc[-1]),
+        "source": source_name,
+        "status": status,
+    }
+    if error:
+        metadata["error"] = error
+    return metadata
+
+
+def _load_existing_history(symbol: str) -> pd.DataFrame | None:
+    source = CLOUD_HISTORY_DIR / f"{symbol}.csv"
+    if not source.exists():
+        return None
+    try:
+        return pd.read_csv(source, parse_dates=["date"])
+    except Exception:
+        return None
+
+
+def build_watchlist_histories(run_date: date | None = None) -> dict[str, object]:
+    """Refresh symbols independently and preserve the last valid cloud snapshot."""
     symbols = load_watchlist()
-    quotes = fetch_tencent_stock_quotes(symbols)
+    try:
+        quotes = fetch_tencent_stock_quotes(symbols)
+    except Exception:
+        # A failed batch quote must not prevent per-symbol fallback requests.
+        quotes = {}
+
     CLOUD_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    start = date.today() - timedelta(days=365 * 3)
-    end = date.today()
-    row_count = 0
-    updated_count = 0
-    failures: dict[str, str] = {}
-    source_counts: dict[str, int] = {}
+    today = run_date or china_market_today()
+    start = today - timedelta(days=365 * 3)
+    end = today
+    expected_date = expected_latest_business_day(end)
     previous_manifest = _load_previous_manifest()
     previous_symbols = previous_manifest.get("symbols", {})
     if not isinstance(previous_symbols, dict):
         previous_symbols = {}
+
     manifest_symbols: dict[str, dict[str, object]] = {}
+    updated_symbols: list[str] = []
+    failures: dict[str, str] = {}
+    source_counts: dict[str, int] = {}
 
     for symbol in symbols:
         try:
-            quote = quotes.get(symbol, {})
-            price = float(quote.get("price") or 0)
-            if price <= 0:
-                raise RuntimeError(f"无法获取 {symbol} 的正常市场价格")
+            batch_quote = quotes.get(symbol)
+            quote = batch_quote if _quote_is_complete(batch_quote) else fetch_latest_market_quote(symbol)
+            history, source_name = _fetch_verified_history(symbol, start, end, quote)
 
-            history, source_name = _fetch_fresh_history(symbol, start, end)
-            latest_close = float(history["close"].iloc[-1])
-            latest_date = history["date"].max().date()
-            quote_time = quote.get("quote_time")
+            target = CLOUD_HISTORY_DIR / f"{symbol}.csv"
+            temporary = target.with_suffix(".csv.tmp")
+            history.to_csv(temporary, index=False)
+            temporary.replace(target)
 
-            if quote_time is None:
-                raise RuntimeError(f"{symbol} 腾讯行情缺少时间")
-            if quote_time.date() < latest_date:
-                raise RuntimeError(
-                    f"{symbol} 腾讯行情日期 {quote_time.date().isoformat()} 早于历史行情 {latest_date.isoformat()}"
-                )
-            if quote_time.date() == latest_date and abs(latest_close - price) > 0.011:
-                raise RuntimeError(
-                    f"{symbol} 前复权末日收盘 {latest_close:.4f} 与腾讯最新价 {price:.4f} 不一致"
-                )
-
-            history.to_csv(CLOUD_HISTORY_DIR / f"{symbol}.csv", index=False)
-            row_count += len(history)
-            updated_count += 1
+            manifest_symbols[symbol] = _history_metadata(
+                symbol,
+                history,
+                source_name=source_name,
+                status="updated",
+            )
+            updated_symbols.append(symbol)
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
-            manifest_symbols[symbol] = {
-                "rows": len(history),
-                "first_date": history["date"].min().date().isoformat(),
-                "latest_date": latest_date.isoformat(),
-                "latest_close": latest_close,
-                "source": source_name,
-            }
         except Exception as exc:
-            failures[symbol] = str(exc)
-            previous = previous_symbols.get(symbol)
-            if isinstance(previous, dict):
-                manifest_symbols[symbol] = previous
-            print(f"WARNING: keeping previous cloud history for {symbol}: {exc}")
+            error = str(exc)
+            failures[symbol] = error
+            existing = _load_existing_history(symbol)
+            if existing is not None:
+                try:
+                    manifest_symbols[symbol] = _history_metadata(
+                        symbol,
+                        existing,
+                        source_name="既有云端备份",
+                        status="stale",
+                        error=error,
+                    )
+                except Exception:
+                    manifest_symbols[symbol] = {"status": "invalid", "error": error}
+            else:
+                previous = previous_symbols.get(symbol)
+                if isinstance(previous, dict):
+                    stale_metadata = dict(previous)
+                    stale_metadata["status"] = "stale"
+                    stale_metadata["error"] = error
+                    stale_metadata.setdefault("source", "既有云端备份")
+                    manifest_symbols[symbol] = stale_metadata
+                else:
+                    manifest_symbols[symbol] = {"status": "missing", "error": error}
+            print(f"WARNING: keeping previous cloud history for {symbol}: {error}")
 
-    if updated_count == 0:
+    if not updated_symbols:
         raise RuntimeError(
             "所有自选股云端历史更新均失败；为避免提交无效数据，本次任务终止。"
             + (f" failures={failures}" if failures else "")
         )
 
+    row_count = sum(int(item.get("rows", 0)) for item in manifest_symbols.values())
     manifest = {
         "source": "baostock/eastmoney",
         "adjust": "qfq",
-        "generated_on": date.today().isoformat(),
-        "expected_latest_date": expected_latest_business_day(end).isoformat(),
+        "generated_on": today.isoformat(),
+        "expected_latest_date": expected_date.isoformat(),
+        "updated_symbols": updated_symbols,
+        "failed_symbols": failures,
         "symbols": manifest_symbols,
         "refresh": {
             "requested_symbols": len(symbols),
-            "updated_symbols": updated_count,
+            "updated_symbols": len(updated_symbols),
             "failed_symbols": len(failures),
             "source_counts": source_counts,
             "failures": failures,
@@ -140,8 +260,9 @@ def build_watchlist_histories() -> dict[str, object]:
 
     return {
         "symbol_count": len(symbols),
-        "updated_count": updated_count,
+        "updated_count": len(updated_symbols),
         "failed_count": len(failures),
+        "failed_symbols": failures,
         "row_count": row_count,
         "source_counts": source_counts,
     }
@@ -164,7 +285,7 @@ def build_market_snapshot() -> dict[str, object]:
         "total_symbols": int(summary.get("total_symbols", 0)),
         "eligible_symbols": int(summary.get("eligible_symbols", len(candidates))),
         "snapshot_candidates": len(candidates),
-        "generated_on": date.today().isoformat(),
+        "generated_on": china_market_today().isoformat(),
     }
     (CLOUD_DATA_DIR / "market_snapshot.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",

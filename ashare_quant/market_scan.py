@@ -10,7 +10,7 @@ import pandas as pd
 import requests
 
 from .backtest import run_ma_cross_backtest
-from .data import CLOUD_DATA_DIR, SEQUOIA_DB_PATH, fetch_ashare_daily
+from .data import CLOUD_DATA_DIR, SEQUOIA_DB_PATH, china_market_today, fetch_ashare_daily
 from .scanner import scan_stock_pool
 from .watchlist import (
     DEFAULT_WATCHLIST_PATH,
@@ -314,7 +314,7 @@ def scan_market_universe(
     Sina/Tencent real-time interface for recent requests before falling back to
     slower/staler sources.
     """
-    end = end or date.today()
+    end = end or china_market_today()
     start = start or end - timedelta(days=365)
     selected = list(symbols)[:max_symbols] if max_symbols else list(symbols)
     data_by_symbol: dict[str, pd.DataFrame] = {}

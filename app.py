@@ -25,6 +25,7 @@ from ashare_quant.backtest import (
 from ashare_quant.chart_viewport import default_visible_bar_range
 from ashare_quant.charting import aggregate_price_bars
 from ashare_quant.data import (
+    china_market_today,
     fetch_ashare_daily,
     fetch_latest_market_quote,
     fetch_sequoia_sqlite_daily,
@@ -858,6 +859,7 @@ def build_indicator_figure(result: pd.DataFrame) -> go.Figure | None:
 
 watchlist_entries = without_watchlist_tags(load_watchlist_entries(DEFAULT_WATCHLIST_PATH))
 watchlist_symbols = [item.symbol for item in watchlist_entries]
+market_today = china_market_today()
 st.session_state.setdefault("analysis_symbol_input", "600522")
 if st.session_state.get("quick_watchlist_symbol", "") not in {"", *watchlist_symbols}:
     st.session_state["quick_watchlist_symbol"] = ""
@@ -881,9 +883,9 @@ with st.sidebar:
     )
     date_left, date_right = st.columns(2)
     with date_left:
-        start = st.date_input("开始日期", value=date.today() - timedelta(days=365 * 2))
+        start = st.date_input("开始日期", value=market_today - timedelta(days=365 * 2))
     with date_right:
-        end = st.date_input("结束日期", value=date.today())
+        end = st.date_input("结束日期", value=market_today)
     adjust = st.selectbox(
         "回测价格口径",
         ["qfq", "", "hfq"],
@@ -1048,32 +1050,41 @@ st.markdown(
     f'<p>{escape(strategy_name)} · {escape(data_status["adjust_label"])}价格口径</p></div>',
     unsafe_allow_html=True,
 )
+strategy_day = pd.Timestamp(data_status["latest_trade_day"]).normalize()
+strategy_day_label = strategy_day.strftime("%Y-%m-%d")
+strategy_day_short = strategy_day.strftime("%m-%d")
 if quote:
     quote_price = float(quote["price"])
-    quote_day = pd.Timestamp(quote["quote_time"]).normalize()
+    quote_timestamp = pd.Timestamp(quote["quote_time"])
+    quote_day = quote_timestamp.normalize()
     reference_close = float(quote.get("previous_close") or 0)
     if not reference_close:
         history_dates = pd.to_datetime(data["date"]).dt.normalize()
         earlier = data.loc[history_dates < quote_day, "close"]
         reference_close = float(earlier.iloc[-1]) if not earlier.empty else float(data["close"].iloc[-2] if len(data) > 1 else data["close"].iloc[-1])
     quote_change_pct = (quote_price / reference_close - 1) * 100 if reference_close else 0.0
-    quote_time_label = pd.Timestamp(quote["quote_time"]).strftime("%Y-%m-%d %H:%M")
+    quote_time_label = quote_timestamp.strftime("%Y-%m-%d %H:%M")
 else:
     quote_price = float(data["close"].iloc[-1])
     quote_change_pct = float(data["close"].pct_change().iloc[-1] * 100) if len(data) > 1 else 0.0
     quote_time_label = data_status["latest_trade_day"]
+    quote_day = strategy_day
 
 latest = result.iloc[-1]
 signal_label = "持有 / 关注" if int(latest.get("signal", 0)) == 1 else "空仓 / 等待"
 signal_action = str(latest.get("action", "")) or "无新动作"
 market_is_open = is_mainland_market_session()
-price_label = "盘中价格" if quote and market_is_open else "最新收盘" if quote else "最新历史收盘"
+quote_day_label = quote_day.strftime("%Y-%m-%d")
+quote_day_short = quote_day.strftime("%m-%d")
+quote_is_newer_than_strategy = bool(quote) and quote_day > strategy_day
+price_kind = "盘中价格" if quote and market_is_open else "最新收盘" if quote else "最新历史收盘"
+price_label = f"{price_kind} · {quote_day_short}"
 metric_cols = st.columns(5)
 metric_cols[0].metric(price_label, f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%", delta_color="inverse")
-metric_cols[1].metric(f"当前信号 · {signal_action}", signal_label)
-metric_cols[2].metric("策略总收益", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
-metric_cols[3].metric("最大回撤", f"{summary['max_drawdown_pct']:.2f}%")
-metric_cols[4].metric(f"夏普比率 · {summary['trade_count']}次交易", f"{summary['sharpe']:.2f}")
+metric_cols[1].metric(f"策略信号 · 截至{strategy_day_short}", signal_label)
+metric_cols[2].metric(f"策略总收益 · 截至{strategy_day_short}", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
+metric_cols[3].metric(f"最大回撤 · 截至{strategy_day_short}", f"{summary['max_drawdown_pct']:.2f}%")
+metric_cols[4].metric(f"夏普比率 · 截至{strategy_day_short}", f"{summary['sharpe']:.2f}")
 is_static_backup = bool(data.attrs.get("is_static_backup", False))
 latest_bar_from_quote = bool(data.attrs.get("latest_bar_from_quote", False))
 price_verified = bool(data.attrs.get("price_verified", not use_demo))
@@ -1098,11 +1109,20 @@ st.markdown(
     f'<div class="aq-status-strip"><span class="aq-status-dot {status_tone}"></span>'
     f'<strong>{escape(status_label)}</strong><span class="aq-status-pill">{escape(quote_mode)}</span>'
     f'<span>{escape(quote_detail)}</span><span class="aq-status-pill">{escape(data_status["adjust_label"])}</span>'
-    f'<span>最新交易日 {escape(data_status["latest_trade_day"])}</span>'
+    f'<span>策略数据截止 {escape(strategy_day_label)}</span><span>策略动作 {escape(signal_action)}</span>'
     f'<span>{escape(data_status["source_name"])} · {data_status["row_count"]} 条</span></div>',
     unsafe_allow_html=True,
 )
-if data_status["is_stale"]:
+if quote_is_newer_than_strategy:
+    freshness_message = (
+        f"行情已更新至 {quote_day_label}，但策略K线只到 {strategy_day_label}；"
+        "策略信号、收益、回撤和夏普均按后者计算。"
+    )
+    if data_status["is_stale"]:
+        st.warning(freshness_message)
+    else:
+        st.info(f"{freshness_message} 盘中出现一个交易日差属于正常情况。")
+elif data_status["is_stale"]:
     st.warning(f"历史行情距请求结束日约 {data_status['staleness_days']} 个工作日，请先确认数据源是否已经收盘更新。")
 elif latest_bar_from_quote:
     st.info("历史区间来自 baostock 前复权备份；最新一根 K 线已通过昨收连续性与 OHLC 校验后补入。")
@@ -1154,7 +1174,7 @@ with overview_tab:
     equity_fig.update_yaxes(gridcolor=CHART_THEME["grid"])
     st.plotly_chart(equity_fig, use_container_width=True, config=PLOT_CONFIG)
 
-    st.subheader("近期信号")
+    st.subheader(f"近期信号 · 截至 {strategy_day_label}")
     display_cols = indicator_display_columns(strategy_name)
     display_table(result.tail(30), columns=display_cols, height=380)
 
@@ -1617,7 +1637,7 @@ with review_tab:
     form_col, history_col = st.columns([0.9, 1.4])
     with form_col:
         with st.form("review_form", clear_on_submit=False):
-            review_date = st.date_input("复盘日期", value=date.today())
+            review_date = st.date_input("复盘日期", value=market_today)
             review_symbol = st.text_input("复盘标的", value=symbol)
             review_planned_action = st.text_input("原计划动作", value="按交易计划观察/执行")
             review_actual_action = st.text_input("实际动作", value="未记录")

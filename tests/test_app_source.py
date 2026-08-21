@@ -5,7 +5,7 @@ def test_app_displays_data_status_latest_trade_day_and_price_basis():
     source = Path("app.py").read_text(encoding="utf-8")
 
     assert "summarize_price_data_status" in source
-    assert "最新交易日" in source
+    assert "策略数据截止" in source
     assert "价格口径" in source
     assert "aq-status-strip" in source
 
@@ -45,7 +45,17 @@ def test_app_uses_china_market_colors_for_metric_deltas():
     assert 'stMetricDeltaIcon-Down' in source
     assert 'delta_color="inverse"' in source
     assert 'f"{summary[\'excess_return_pct\']:+.2f}% 超额"' in source
-    assert '当前信号 · {signal_action}' in source
+    assert '策略信号 · 截至{strategy_day_short}' in source
+
+
+def test_app_separates_quote_date_from_strategy_data_date():
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'price_label = f"{price_kind} · {quote_day_short}"' in source
+    assert "策略数据截止" in source
+    assert "行情已更新至" in source
+    assert 'st.subheader(f"近期信号 · 截至 {strategy_day_label}")' in source
+    assert "market_today = china_market_today()" in source
 
 
 def test_app_exposes_soft_and_dark_theme_switching_for_ui_and_charts():
