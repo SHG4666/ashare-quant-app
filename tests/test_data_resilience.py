@@ -111,7 +111,7 @@ def test_load_cloud_seed_daily_slices_history_and_labels_source(tmp_path):
 
     assert len(result) == 2
     assert result.iloc[-1]["close"] == 11.3
-    assert result.attrs["source_name"] == "静态备份（baostock 前复权）"
+    assert result.attrs["source_name"] == "静态备份（已校验前复权）"
     assert result.attrs["price_verified"] is False
     assert result.attrs["is_static_backup"] is True
 

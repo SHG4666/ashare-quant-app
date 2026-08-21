@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from ashare_quant.market_scan import (
@@ -13,6 +13,7 @@ from ashare_quant.market_scan import (
     select_top_candidates,
     send_feishu_text,
 )
+from ashare_quant.data import china_market_today
 from ashare_quant.watchlist import DEFAULT_WATCHLIST_PATH
 
 
@@ -26,7 +27,7 @@ def main() -> int:
     parser.add_argument("--no-update-watchlist", action="store_true", help="Do not write Top candidates into watchlist")
     args = parser.parse_args()
 
-    end = date.today()
+    end = china_market_today()
     start = end - timedelta(days=args.days)
     symbols = load_market_symbols_from_sequoia()
     scan_result = scan_market_universe(symbols, start=start, end=end, max_symbols=args.max_symbols)

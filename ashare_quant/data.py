@@ -8,6 +8,7 @@ import subprocess
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -22,6 +23,21 @@ SEQUOIA_DB_PATH = Path(
 ASHARE_MODULE_PATH = Path(
     os.environ.get("ASHARE_MODULE_PATH", str(Path.home() / "CODE/Ashare/Ashare.py"))
 )
+CHINA_MARKET_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def china_market_now(now: datetime | None = None) -> datetime:
+    """Return a timezone-naive datetime expressed in Asia/Shanghai market time."""
+    if now is None:
+        return datetime.now(CHINA_MARKET_TZ).replace(tzinfo=None)
+    if now.tzinfo is None:
+        return now
+    return now.astimezone(CHINA_MARKET_TZ).replace(tzinfo=None)
+
+
+def china_market_today(now: datetime | None = None) -> date:
+    """Return the current Shanghai/Shenzhen market calendar date."""
+    return china_market_now(now).date()
 
 
 def normalize_akshare_hist(raw: pd.DataFrame) -> pd.DataFrame:
@@ -169,14 +185,14 @@ def validate_ohlcv_frame(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     return checked.sort_values("date").reset_index(drop=True)
 
 
-def is_recent_market_request(end: date, freshness_days: int = 3) -> bool:
+def is_recent_market_request(end: date, freshness_days: int = 3, now: datetime | None = None) -> bool:
     """Return True when the user asks for data ending close to today."""
-    return 0 <= (date.today() - end).days <= freshness_days
+    return 0 <= (china_market_today(now) - end).days <= freshness_days
 
 
 def is_mainland_market_session(now: datetime | None = None) -> bool:
     """Return whether Shanghai/Shenzhen continuous trading may be active."""
-    current = now or datetime.now()
+    current = china_market_now(now)
     if current.weekday() >= 5:
         return False
     current_time = current.time()
@@ -192,7 +208,7 @@ def _business_days_between(start: date, end: date) -> int:
 
 def expected_latest_business_day(end: date, now: datetime | None = None) -> date:
     """Estimate the latest completed trading day without treating weekends as stale."""
-    current = now or datetime.now()
+    current = china_market_now(now)
     expected = end
     if end >= current.date() and current.weekday() < 5 and current.time() < time(15, 5):
         expected = current.date() - timedelta(days=1)
@@ -211,6 +227,21 @@ def is_price_history_fresh(df: pd.DataFrame, end: date, now: datetime | None = N
     return latest.date() >= expected_latest_business_day(end, now=now)
 
 
+def require_recent_price_history(
+    df: pd.DataFrame,
+    end: date,
+    source_name: str,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """Reject a live provider response that misses a completed trading day."""
+    if not is_recent_market_request(end, now=now) or is_price_history_fresh(df, end=end, now=now):
+        return df
+    latest = pd.to_datetime(df["date"], errors="coerce").max()
+    latest_label = latest.date().isoformat() if not pd.isna(latest) else "未知"
+    expected = expected_latest_business_day(end, now=now).isoformat()
+    raise RuntimeError(f"{source_name} 历史行情仅到 {latest_label}，应至少到 {expected}")
+
+
 def summarize_price_data_status(
     df: pd.DataFrame,
     symbol: str,
@@ -218,10 +249,12 @@ def summarize_price_data_status(
     end: date,
     adjust: str,
     source_name: str,
+    now: datetime | None = None,
 ) -> dict:
     """Summarize data freshness and price adjustment for display."""
     latest = pd.to_datetime(df["date"]).max().date()
-    staleness_days = _business_days_between(latest, end)
+    expected_latest = expected_latest_business_day(end, now=now)
+    staleness_days = _business_days_between(latest, expected_latest)
     is_stale = staleness_days > 0
     requested_range = f"{start.isoformat()} 至 {end.isoformat()}"
     label = adjustment_label(adjust)
@@ -274,7 +307,7 @@ def fetch_eastmoney_latest_market_quote(symbol: str) -> dict[str, object]:
     quote_time = (
         pd.to_datetime(int(timestamp), unit="s", utc=True).tz_convert("Asia/Shanghai").tz_localize(None)
         if timestamp
-        else pd.Timestamp.now()
+        else pd.Timestamp(china_market_now())
     )
     return {
         "symbol": symbol,
@@ -399,7 +432,7 @@ def fetch_baostock_stock_names(symbols: list[str]) -> dict[str, str]:
         symbols_by_code = {baostock_code(symbol): symbol for symbol in clean_symbols}
         query_all_stock = getattr(bs, "query_all_stock", None)
         if callable(query_all_stock):
-            result = query_all_stock(day=date.today().isoformat())
+            result = query_all_stock(day=china_market_today().isoformat())
             if result.error_code == "0":
                 while result.next():
                     row = result.get_row_data()
@@ -571,7 +604,7 @@ def load_cloud_seed_daily(
     end: date,
     history_dir: str | Path = CLOUD_HISTORY_DIR,
 ) -> pd.DataFrame:
-    """Load a static baostock qfq backup bundled for cloud deployment."""
+    """Load a verified static qfq backup bundled for cloud deployment."""
     source = Path(history_dir) / f"{str(symbol).strip()}.csv"
     if not source.exists():
         raise FileNotFoundError(f"云端静态备份不存在：{symbol}")
@@ -584,7 +617,7 @@ def load_cloud_seed_daily(
     if sliced.empty:
         raise ValueError(f"云端静态备份没有 {symbol} 在 {start} 到 {end} 的数据")
     sliced = sliced.reset_index(drop=True)
-    sliced.attrs["source_name"] = "静态备份（baostock 前复权）"
+    sliced.attrs["source_name"] = "静态备份（已校验前复权）"
     sliced.attrs["price_verified"] = False
     sliced.attrs["is_static_backup"] = True
     return sliced
@@ -619,7 +652,7 @@ def append_latest_completed_market_bar(
     if quote_day <= latest_day or quote_day > end:
         return result
 
-    current = now or datetime.now()
+    current = china_market_now(now)
     if quote_day >= current.date() and current.time() < time(15, 5):
         return result
     if _business_days_between(latest_day, quote_day) != 1:
@@ -805,6 +838,7 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
 
     try:
         df = fetch_baostock_daily(symbol, start, end, adjust)
+        df = require_recent_price_history(df, end, "baostock")
         df.to_csv(cache_file, index=False)
         return with_data_source(df, "baostock")
     except Exception:
@@ -840,12 +874,16 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
             adjust=adjust,
         )
         df = normalize_akshare_hist(raw)
+        df = require_recent_price_history(df, end, "AkShare")
     except Exception:
         try:
             df = fetch_eastmoney_daily_with_curl(symbol, start, end, adjust)
+            df = require_recent_price_history(df, end, "东方财富K线")
         except Exception:
             cached = load_latest_symbol_cache(symbol, adjust)
-            if cached is not None:
+            if cached is not None and (
+                not is_recent_market_request(end) or is_price_history_fresh(cached, end=end)
+            ):
                 return with_data_source(cached, "本地历史缓存")
             if adjust == "qfq":
                 try:
@@ -860,6 +898,10 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
                     return backup
                 except Exception:
                     pass
+            if cached is not None:
+                cached = with_data_source(cached, "滞后本地历史缓存", price_verified=False)
+                cached.attrs["latest_quote_warning"] = "在线历史行情与云端备份均不可用，当前缓存可能滞后"
+                return cached
             raise RuntimeError("在线数据源暂时不可用，且本地没有该股票缓存；请稍后重试或勾选离线演示数据。")
     df.to_csv(cache_file, index=False)
     return with_data_source(df, "AkShare/东方财富备用链路")
@@ -868,7 +910,7 @@ def fetch_ashare_daily(symbol: str, start: date, end: date, adjust: str = "qfq")
 def make_demo_data(days: int = 260) -> pd.DataFrame:
     """Offline demo data when network/API is unavailable."""
     rng = np.random.default_rng(42)
-    dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=days)
+    dates = pd.bdate_range(end=pd.Timestamp(china_market_today()), periods=days)
     trend = np.linspace(0, 0.35, days)
     cycle = 0.08 * np.sin(np.linspace(0, 8 * np.pi, days))
     noise = rng.normal(0, 0.012, days).cumsum()
