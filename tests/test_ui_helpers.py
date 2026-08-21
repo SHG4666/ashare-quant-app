@@ -8,6 +8,7 @@ from ashare_quant.ui_helpers import (
     parse_portfolio_symbols,
     strategy_guide,
     strategy_report_slug,
+    summarize_latest_strategy_state,
 )
 
 
@@ -89,6 +90,42 @@ def test_indicator_display_columns_returns_recent_signal_columns_for_each_strate
     ]
     assert indicator_display_columns("MACD金叉")[2:5] == ["macd_dif", "macd_dea", "macd_hist"]
     assert indicator_display_columns("布林带均值回归")[2:5] == ["bb_middle", "bb_upper", "bb_lower"]
+
+
+def test_strategy_state_prioritizes_stop_loss_lock_over_raw_long_signal():
+    result = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-08-20", "2026-08-21"]),
+            "signal": [1, 1],
+            "position": [1.0, 0.0],
+            "action": ["SELL", ""],
+            "risk_exit": ["STOP_LOSS", ""],
+            "risk_blocked": [False, True],
+        }
+    )
+
+    status = summarize_latest_strategy_state(result)
+
+    assert status["state_label"] == "空仓 / 风险锁定"
+    assert status["condition_label"] == "多头条件"
+    assert status["latest_action_label"] == "08-20 止损卖出"
+    assert status["risk_blocked"] is True
+    assert "等待模型信号先归零" in str(status["explanation"])
+
+
+def test_strategy_state_reports_actual_held_position():
+    result = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-08-21"]),
+            "signal": [1],
+            "position": [1.0],
+            "action": [""],
+            "risk_exit": [""],
+            "risk_blocked": [False],
+        }
+    )
+
+    assert summarize_latest_strategy_state(result)["state_label"] == "持有 / 在仓"
 
 
 def test_strategy_report_slug_maps_ui_strategy_names_to_download_filenames():

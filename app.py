@@ -53,6 +53,7 @@ from ashare_quant.ui_helpers import (
     parse_portfolio_symbols,
     strategy_guide,
     strategy_report_slug,
+    summarize_latest_strategy_state,
 )
 from ashare_quant.watchlist import (
     DEFAULT_WATCHLIST_PATH,
@@ -1070,9 +1071,10 @@ else:
     quote_time_label = data_status["latest_trade_day"]
     quote_day = strategy_day
 
-latest = result.iloc[-1]
-signal_label = "持有 / 关注" if int(latest.get("signal", 0)) == 1 else "空仓 / 等待"
-signal_action = str(latest.get("action", "")) or "无新动作"
+strategy_state = summarize_latest_strategy_state(result)
+strategy_state_label = str(strategy_state["state_label"])
+strategy_condition_label = str(strategy_state["condition_label"])
+latest_action_label = str(strategy_state["latest_action_label"])
 market_is_open = is_mainland_market_session()
 quote_day_label = quote_day.strftime("%Y-%m-%d")
 quote_day_short = quote_day.strftime("%m-%d")
@@ -1081,7 +1083,7 @@ price_kind = "盘中价格" if quote and market_is_open else "最新收盘" if q
 price_label = f"{price_kind} · {quote_day_short}"
 metric_cols = st.columns(5)
 metric_cols[0].metric(price_label, f"¥{quote_price:,.2f}", f"{quote_change_pct:+.2f}%", delta_color="inverse")
-metric_cols[1].metric(f"策略信号 · 截至{strategy_day_short}", signal_label)
+metric_cols[1].metric(f"策略状态 · 截至{strategy_day_short}", strategy_state_label)
 metric_cols[2].metric(f"策略总收益 · 截至{strategy_day_short}", f"{summary['total_return_pct']:.2f}%", f"{summary['excess_return_pct']:+.2f}% 超额", delta_color="inverse")
 metric_cols[3].metric(f"最大回撤 · 截至{strategy_day_short}", f"{summary['max_drawdown_pct']:.2f}%")
 metric_cols[4].metric(f"夏普比率 · 截至{strategy_day_short}", f"{summary['sharpe']:.2f}")
@@ -1109,10 +1111,17 @@ st.markdown(
     f'<div class="aq-status-strip"><span class="aq-status-dot {status_tone}"></span>'
     f'<strong>{escape(status_label)}</strong><span class="aq-status-pill">{escape(quote_mode)}</span>'
     f'<span>{escape(quote_detail)}</span><span class="aq-status-pill">{escape(data_status["adjust_label"])}</span>'
-    f'<span>策略数据截止 {escape(strategy_day_label)}</span><span>策略动作 {escape(signal_action)}</span>'
+    f'<span>策略数据截止 {escape(strategy_day_label)}</span>'
+    f'<span>模型条件 {escape(strategy_condition_label)}</span>'
+    f'<span>最近动作 {escape(latest_action_label)}</span>'
     f'<span>{escape(data_status["source_name"])} · {data_status["row_count"]} 条</span></div>',
     unsafe_allow_html=True,
 )
+if bool(strategy_state["risk_blocked"]):
+    st.warning(
+        f'{latest_action_label}；{strategy_state["explanation"]}'
+        f" 当前执行状态：{strategy_state_label}。"
+    )
 if quote_is_newer_than_strategy:
     freshness_message = (
         f"行情已更新至 {quote_day_label}，但策略K线只到 {strategy_day_label}；"
